@@ -111,10 +111,6 @@ if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("summary", manual_summary))
-    app.add_handler(CommandHandler("ping", ping))
-    app.add_handler(CommandHandler("debug", debug))
-    app.add_handler(CommandHandler("profile", profile))
-    app.add_handler(CommandHandler("topics", topics))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message))
 
     scheduler = BackgroundScheduler()
@@ -123,60 +119,3 @@ if __name__ == '__main__':
 
     logger.info("Бот запущен")
     app.run_polling()
-
-# --- ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ ---
-
-async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Я на связи!")
-
-async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    chat = update.effective_chat
-    debug_info = (
-        f"👤 Пользователь: {user.first_name} (@{user.username})\n"
-        f"🆔 User ID: {user.id}\n"
-        f"💬 Chat ID: {chat.id}\n"
-        f"👥 Chat Type: {chat.type}"
-    )
-    await update.message.reply_text(debug_info)
-
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Используй: /profile @username")
-        return
-    username = context.args[0].lstrip('@')
-    today = str(datetime.date.today())
-    c.execute("SELECT text FROM messages WHERE username = ? AND date = ?", (username, today))
-    rows = c.fetchall()
-    if not rows:
-        await update.message.reply_text("Нет сообщений от этого пользователя сегодня.")
-        return
-    messages = [r[0] for r in rows]
-    prompt = (
-        f"Проанализируй следующие сообщения пользователя @{username} и составь краткий психологический портрет:\n"
-        + "\n".join(messages)
-    )
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=500
-    )
-    await update.message.reply_text(response["choices"][0]["message"]["content"])
-
-async def topics(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    today = str(datetime.date.today())
-    c.execute("SELECT text FROM messages WHERE date = ?", (today,))
-    rows = c.fetchall()
-    if not rows:
-        await update.message.reply_text("Сегодня ещё нет обсуждений.")
-        return
-    joined = "\n".join([r[0] for r in rows])
-    prompt = (
-        "Выдели основные темы, которые поднимались в этой переписке:\n" + joined
-    )
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=300
-    )
-    await update.message.reply_text("🧵 Темы дня:\n" + response["choices"][0]["message"]["content"])
