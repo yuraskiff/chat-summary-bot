@@ -1,7 +1,5 @@
 
 import os
-if os.path.exists("messages.db"):
-    os.remove("messages.db")
 import logging
 import datetime
 import openai
@@ -12,8 +10,8 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- НАСТРОЙКИ ---
-BOT_TOKEN = "7396613294:AAEUw4cxNXP6BcGVpJBxrfx0XsqBDEBOBdc"
-OPENAI_API_KEY = "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"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
 # --- ЛОГИРОВАНИЕ ---
@@ -21,6 +19,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- БАЗА ДАННЫХ ---
+import os
+if os.path.exists("messages.db"):
+    os.remove("messages.db")
 conn = sqlite3.connect("messages.db", check_same_thread=False)
 c = conn.cursor()
 c.execute("DROP TABLE IF EXISTS messages")
