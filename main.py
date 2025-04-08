@@ -12,7 +12,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # --- НАСТРОЙКИ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-CHAT_ID = int(os.getenv("CHAT_ID"))
 openai.api_key = OPENAI_API_KEY
 
 # --- ЛОГИРОВАНИЕ ---
