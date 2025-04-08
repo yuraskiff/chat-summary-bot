@@ -10,8 +10,8 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- НАСТРОЙКИ ---
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+BOT_TOKEN = os.getenv("7396613294:AAF0IoZM2rXOQz0bUQ6RSSx3aR7NwPSjgQQ")
+OPENAI_API_KEY = os.getenv("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")
 openai.api_key = OPENAI_API_KEY
 
 # --- ЛОГИРОВАНИЕ ---
