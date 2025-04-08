@@ -1,5 +1,7 @@
 
 import os
+if os.path.exists("messages.db"):
+    os.remove("messages.db")
 import logging
 import datetime
 import openai
