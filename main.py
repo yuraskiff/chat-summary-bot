@@ -10,8 +10,8 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- НАСТРОЙКИ ---
-BOT_TOKEN = "7396613294:AAEUw4cxNXP6BcGVpJBxrfx0XsqBDEBOBdc"
-OPENAI_API_KEY = "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"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
 # --- ЛОГИРОВАНИЕ ---
@@ -30,6 +30,30 @@ conn.commit()
 
 # --- ОБРАБОТКА СООБЩЕНИЙ ---
 async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+
+    logger.info(f"Новое сообщение в чате {chat.id} от @{user.username or user.first_name}")
+
+    try:
+        member = await context.bot.get_chat_member(chat.id, context.bot.id)
+        is_admin = member.status in ['administrator', 'creator']
+    except Exception as e:
+        logger.warning(f"Ошибка при проверке прав администратора: {e}")
+        return
+
+    if update.message and update.message.text:
+        username = user.username or user.first_name
+        text = update.message.text
+        date = str(datetime.date.today())
+        c.execute("INSERT INTO messages (date, chat_id, username, text) VALUES (?, ?, ?, ?)", (date, chat.id, username, text))
+        conn.commit()
+        logger.info(f"Сохранено сообщение: {username}: {text}")
+
+
+    if not is_admin:
+        logger.info(f"Бот не является админом в чате {chat.id}, сообщение проигнорировано.")
+        return
     if update.effective_chat.id == CHAT_ID and update.message and update.message.text:
         username = update.message.from_user.username or update.message.from_user.first_name
         text = update.message.text
