@@ -31,8 +31,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")  # Токен Телеграм-бота
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # API-ключ OpenAI
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # URL вашего приложения на Render (например, https://<app-name>.onrender.com)
 PORT = int(os.environ.get("PORT", "5000"))  # Порт, который отдаёт Render
-TIMEZONE = os.getenv("TZ", "Europe/Moscow")  # Часовой пояс; можно переопределить через переменные окружения
+TIMEZONE = os.getenv("TZ", "Europe/Moscow")  # Часовой пояс
 
+# Задаём API ключ для openai
 openai.api_key = OPENAI_API_KEY
 
 # ----------------------------------
@@ -85,8 +86,7 @@ def get_messages_for_today(chat_id: str):
 def get_unique_chat_ids():
     """
     Возвращает список уникальных chat_id из таблицы (упрощённый пример).
-    В реальной ситуации лучше хранить список групп явно, но для демонстрации
-    просто берём уникальные ID из таблицы сообщений.
+    В реальной ситуации рекомендуется хранить список групп явно.
     """
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
@@ -100,22 +100,20 @@ def get_unique_chat_ids():
 
 async def generate_summary(messages) -> str:
     """
-    Запрашивает у OpenAI краткую выжимку (саммари).
-    Ограничивает объём передаваемых сообщений, чтобы не превысить лимит.
+    Запрашивает у OpenAI краткую выжимку (саммари) с использованием Chat API.
+    Использует модель GPT‑4. Ограничивает объём передаваемых сообщений,
+    чтобы не превысить лимиты.
     """
     if not messages:
         return "Сегодня сообщений не было."
 
-    # Простейшее ограничение — последние 300 сообщений.
+    # Ограничиваем до последних 300 сообщений
     limited_messages = messages[-300:]
-
-    # Формируем текст для prompt
     text_for_prompt = "\n".join(
-        f"[{row[1]}] {row[2]}"  # username: message
+        f"[{row[1]}] {row[2]}"  # формат: username: сообщение
         for row in limited_messages
     )
-
-    # Чтобы не выходить за лимиты, допустим, ограничим до 5000 символов.
+    # Ограничиваем длину текста до 5000 символов
     text_for_prompt = text_for_prompt[-5000:]
 
     prompt = (
@@ -124,13 +122,17 @@ async def generate_summary(messages) -> str:
     )
 
     try:
-        response = openai.Completion.create(
-            model="text-davinci-003",
-            prompt=prompt,
+        # Асинхронный вызов OpenAI Chat API
+        response = await openai.ChatCompletion.acreate(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Ты ассистент, который составляет саммари сообщений."},
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=300,
             temperature=0.7
         )
-        summary_text = response["choices"][0]["text"].strip()
+        summary_text = response["choices"][0]["message"]["content"].strip()
         return summary_text if summary_text else "Не удалось получить саммари."
     except Exception as e:
         logger.error(f"Ошибка при обращении к OpenAI: {e}")
@@ -143,12 +145,11 @@ scheduler = BackgroundScheduler()
 
 def schedule_daily_summary(application):
     """
-    Запускает задачу, которая каждый день в 23:59 (по заданному часовому поясу)
+    Планирует задачу, которая каждый день в 23:59 (по заданному часовому поясу)
     генерирует саммари для каждого чата.
     """
     tz = pytz.timezone(TIMEZONE)
     trigger = CronTrigger(hour=23, minute=59, timezone=tz)
-
     scheduler.add_job(
         func=lambda: application.create_task(daily_summary_task(application)),
         trigger=trigger,
@@ -175,21 +176,22 @@ async def daily_summary_task(application):
 # ----------------------------------
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ответ на /start для проверки."""
+    """Обработчик команды /start."""
     await update.message.reply_text(
         "Привет! Я бот, который делает саммари. Добавь меня в группу и дай права админа!"
     )
 
 async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ручная команда /summary — делает саммари по последним 24 часам."""
+    """Обработчик команды /summary — ручной вызов саммари за последние 24 часа."""
     chat_id = str(update.effective_chat.id)
     messages = get_messages_for_today(chat_id)
     summary_text = await generate_summary(messages)
     await update.message.reply_text(summary_text)
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Хэндлер для всех сообщений (кроме команд). Сохраняет в БД."""
-    if update.effective_chat is None or update.effective_user is None:
+    """Обработчик текстовых сообщений (не команд), сохраняет их в БД."""
+    # Проверяем, что необходимые данные присутствуют
+    if update.effective_chat is None or update.effective_user is None or update.message is None:
         return
 
     chat_id = str(update.effective_chat.id)
@@ -204,23 +206,22 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------
 
 def main():
-    # Инициализация БД
+    # Инициализация базы данных
     init_db()
 
-    # Создаём приложение
+    # Создаем приложение Telegram бота
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Регистрируем команды
+    # Регистрируем команды и обработчики сообщений
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("summary", summary_command))
-    # Регистрируем обработчик обычных сообщений (фильтр TEXT)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     # Планируем ежедневное саммари
     schedule_daily_summary(application)
 
-    # Настройка вебхука (для Render)
-    webhook_path = "/telegram"  # Можно изменить на любой путь
+    # Настройка вебхука (например, для Render)
+    webhook_path = "/telegram"
     full_webhook_url = f"{WEBHOOK_URL}{webhook_path}"
 
     application.run_webhook(
