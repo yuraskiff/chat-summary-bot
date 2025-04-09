@@ -124,14 +124,15 @@ async def generate_summary(messages) -> str:
     try:
         # Асинхронный вызов OpenAI Chat API
         response = await openai.ChatCompletion.acreate(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "Ты ассистент, который составляет саммари сообщений."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=300,
-            temperature=0.7
-        )
+    model="gpt-3.5-turbo",
+    messages=[
+        {"role": "system", "content": "Ты ассистент, который составляет саммари сообщений."},
+        {"role": "user", "content": prompt}
+    ],
+    max_tokens=300,
+    temperature=0.7
+)
+
         summary_text = response["choices"][0]["message"]["content"].strip()
         return summary_text if summary_text else "Не удалось получить саммари."
     except Exception as e:
