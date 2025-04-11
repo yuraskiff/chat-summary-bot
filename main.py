@@ -30,13 +30,13 @@ logger = logging.getLogger(__name__)
 # ----------------------------------
 # 2. Переменные окружения
 # ----------------------------------
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Токен Телеграм-бота
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # API-ключ OpenAI
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # URL вашего приложения (например, https://<app-name>.onrender.com)
-PORT = int(os.environ.get("PORT", "5000"))  # Render передаёт нужный порт через переменную окружения
-TIMEZONE = os.getenv("TZ", "Europe/Moscow")  # Часовой пояс
+BOT_TOKEN = os.getenv("BOT_TOKEN")             # Токен Телеграм-бота
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")     # API-ключ OpenAI
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")           # URL вашего приложения (например, https://<app-name>.onrender.com)
+PORT = int(os.environ.get("PORT", "5000"))         # Render передает нужный порт через переменную окружения
+TIMEZONE = os.getenv("TZ", "Europe/Moscow")        # Часовой пояс
 
-# Задаём API-ключ для openai
+# Задаём API-ключ для OpenAI
 openai.api_key = OPENAI_API_KEY
 
 # ----------------------------------
@@ -45,7 +45,7 @@ openai.api_key = OPENAI_API_KEY
 DB_PATH = "messages.db"
 
 def init_db():
-    """Создаёт таблицу для хранения сообщений, если её ещё нет."""
+    """Создает таблицу для хранения сообщений, если её еще нет."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -61,25 +61,29 @@ def init_db():
         conn.commit()
 
 def store_message(chat_id: str, user_id: str, username: str, text: str):
-    """Сохраняет сообщение в БД с текущим временем (UTC)."""
+    """Сохраняет сообщение в БД с текущим временем (UTC) в виде строки."""
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO chat_messages (chat_id, user_id, username, text, timestamp)
             VALUES (?, ?, ?, ?, ?)
-        """, (chat_id, user_id, username, text, datetime.utcnow()))
+        """, (chat_id, user_id, username, text, timestamp))
         conn.commit()
 
 def get_messages_for_today(chat_id: str):
-    """Возвращает все сообщения из указанного чата за последние 24 часа."""
-    now_utc = datetime.utcnow()
-    since_utc = now_utc - timedelta(days=1)
+    """
+    Возвращает все сообщения (за последние 24 часа) из указанного чата 
+    в хронологическом порядке.
+    """
+    since_utc = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT user_id, username, text, timestamp
             FROM chat_messages
             WHERE chat_id = ? AND timestamp >= ?
+            ORDER BY timestamp ASC
         """, (chat_id, since_utc))
         rows = cursor.fetchall()
     return rows
@@ -103,16 +107,16 @@ async def generate_summary(messages) -> str:
     Запрашивает у OpenAI краткое саммари (выжимку) с использованием Chat API.
     Используется асинхронный вызов (acreate) с моделью GPT‑4.
     Если доступа к GPT‑4 нет, измените model на "gpt-3.5-turbo".
+    Обрабатываются все сообщения (исходно сохранённые, за последние 24 часа).
     """
     if not messages:
         return "Сегодня сообщений не было."
 
-    # Используем последние 300 сообщений
-    limited_messages = messages[-300:]
+    # Формируем текст для подсказки из всех сообщений
     text_for_prompt = "\n".join(
-        f"[{row[1]}] {row[2]}" for row in limited_messages
+        f"[{row[1]}] {row[2]}" for row in messages
     )
-    # Ограничиваем длину текста до 5000 символов
+    # Ограничиваем длину текста до 5000 символов, если необходимо
     text_for_prompt = text_for_prompt[-5000:]
 
     prompt = (
@@ -123,7 +127,7 @@ async def generate_summary(messages) -> str:
     try:
         # Асинхронный вызов к API OpenAI
         response = await openai.ChatCompletion.acreate(
-            model="gpt-4",  # если нет доступа к GPT-4, замените на "gpt-3.5-turbo"
+            model="gpt-4",  # Если нет доступа к GPT‑4, замените на "gpt-3.5-turbo"
             messages=[
                 {"role": "system", "content": "Ты ассистент, который составляет саммари сообщений."},
                 {"role": "user", "content": prompt}
@@ -142,15 +146,16 @@ async def generate_summary(messages) -> str:
 # ----------------------------------
 scheduler = BackgroundScheduler()
 
-def schedule_daily_summary(application):
+def schedule_daily_summary(application, loop):
     """
     Планирует задачу, которая каждый день в 23:59 (по заданному часовому поясу)
     отправляет в каждый чат с сохранёнными сообщениями саммари.
+    Используется asyncio.run_coroutine_threadsafe для корректного запуска асинхронной функции.
     """
     tz = pytz.timezone(TIMEZONE)
     trigger = CronTrigger(hour=23, minute=59, timezone=tz)
     scheduler.add_job(
-        func=lambda: application.create_task(daily_summary_task(application)),
+        func=lambda: asyncio.run_coroutine_threadsafe(daily_summary_task(application), loop),
         trigger=trigger,
         id="daily_summary",
         replace_existing=True
@@ -189,9 +194,16 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(summary_text)
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик текстовых сообщений (не команд), сохраняет сообщения в БД."""
+    """
+    Обработчик текстовых сообщений (не команд). Сохраняет сообщения в БД,
+    если они не были отправлены ботом.
+    """
     if update.effective_chat is None or update.effective_user is None or update.message is None:
         return
+    # Фильтруем сообщения, отправленные ботом, чтобы не сохранять свои сообщения
+    if update.effective_user.is_bot:
+        return
+
     chat_id = str(update.effective_chat.id)
     user_id = str(update.effective_user.id)
     username = update.effective_user.username or "NoName"
@@ -225,8 +237,9 @@ def main():
         await set_commands(app)
     application.post_init = post_init
 
-    # Планируем ежедневное саммари
-    schedule_daily_summary(application)
+    # Получаем главный цикл событий и планируем ежедневное саммари
+    loop = asyncio.get_event_loop()
+    schedule_daily_summary(application, loop)
 
     # Определяем путь вебхука
     webhook_path = "/telegram"
