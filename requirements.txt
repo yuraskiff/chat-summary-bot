@@ -1,6 +1,0 @@
-aiogram
-openai
-python-dotenv
-apscheduler
-sqlalchemy
-asyncpg
