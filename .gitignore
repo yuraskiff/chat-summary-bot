@@ -1,4 +1,32 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-.env
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# VS Code settings
+.vscode/
+
+# macOS
+.DS_Store
+
+# Python-specific
+*.log
 *.sqlite3
 *.db
+instance/
+*.env
+
+# Pytest
+htmlcov/
+.cache/
+*.cover
+coverage.xml
+.pytest_cache/
+
+# Render-specific (если вдруг появятся файлы, которых не хочешь коммитить)
+build/
