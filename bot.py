@@ -22,5 +22,5 @@ async def handle_message(message: types.Message):
 
     await message.reply("✍️ Пишу саммари...")
     summary = await get_summary(text)
-    await message.reply(f"📌 <b>Саммари:</b>
+    await message.reply(f"📌 <b>Саммари:</b>\n{summary}")
 {summary}")
