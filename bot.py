@@ -28,6 +28,5 @@ async def handle_message(message: Message):
     )
 
     summary = response.choices[0].message.content.strip()
-    await message.reply(f"📌 <b>Саммари:</b>
-{summary}")
+    await message.reply(f"📌 <b>Саммари:</b>\n{summary}")
     await save_summary(user_text, summary)
