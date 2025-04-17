@@ -1,5 +1,0 @@
-aiogram==3.2.0
-fastapi==0.110.0
-uvicorn==0.29.0
-sqlalchemy==2.0.29
-asyncpg==0.29.0
