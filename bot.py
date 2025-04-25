@@ -37,8 +37,6 @@ async def send_summary(chat_id: int):
         text_blocks = [f"{msg['username']}: {msg['text']}" for msg in messages]
         summary = await summarize_chat(text_blocks)
         await dp.bot.send_message(chat_id, f"📝 Сводка за сутки:\n\n{summary}")
-
-{summary}")
     except Exception as e:
         logging.error(f"Ошибка саммари: {e}")
         await dp.bot.send_message(chat_id, "⚠️ Не удалось создать саммари.")
