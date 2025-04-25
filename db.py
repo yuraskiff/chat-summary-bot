@@ -1,12 +1,19 @@
-import asyncio
-from bot import dp, schedule_daily_summary
+import asyncpg
+from config import DATABASE_URL
 
-if __name__ == "__main__":
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    from aiogram import Bot
-    from config import TELEGRAM_TOKEN
+async def save_message(username: str, text: str, timestamp):
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute(
+        "INSERT INTO messages (username, text, timestamp) VALUES ($1, $2, $3)",
+        username, text, timestamp
+    )
+    await conn.close()
 
-    bot = Bot(token=TELEGRAM_TOKEN, parse_mode="HTML")
-    schedule_daily_summary()
-    asyncio.run(dp.start_polling(bot))
+async def get_messages_for_summary(since):
+    conn = await asyncpg.connect(DATABASE_URL)
+    rows = await conn.fetch(
+        "SELECT username, text FROM messages WHERE timestamp >= $1 ORDER BY timestamp ASC",
+        since
+    )
+    await conn.close()
+    return [{"username": row["username"], "text": row["text"]} for row in rows]
