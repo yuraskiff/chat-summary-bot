@@ -1,18 +1,19 @@
-import os
-import motor.motor_asyncio
+import asyncpg
 from config import DATABASE_URL
 
-client = motor.motor_asyncio.AsyncIOMotorClient(DATABASE_URL)
-db = client.chat_db
-collection = db.messages
-
 async def save_message(username: str, text: str, timestamp):
-    await collection.insert_one({
-        "username": username,
-        "text": text,
-        "timestamp": timestamp
-    })
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute(
+        "INSERT INTO messages (username, text, timestamp) VALUES ($1, $2, $3)",
+        username, text, timestamp
+    )
+    await conn.close()
 
 async def get_messages_for_summary(since):
-    cursor = collection.find({"timestamp": {"$gte": since}})
-    return await cursor.to_list(length=1000)
+    conn = await asyncpg.connect(DATABASE_URL)
+    rows = await conn.fetch(
+        "SELECT username, text FROM messages WHERE timestamp >= $1 ORDER BY timestamp ASC",
+        since
+    )
+    await conn.close()
+    return [{"username": row["username"], "text": row["text"]} for row in rows]
