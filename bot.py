@@ -35,12 +35,10 @@ async def send_summary(bot: Bot, chat_id: int = None):
     if not messages:
         await bot.send_message(chat_id, "Нет сообщений за последние 24 часа.")
         return
-    try:
+  try:
         text_blocks = [f"{msg['username']}: {msg['text']}" for msg in messages]
         summary = await summarize_chat(text_blocks)
         await bot.send_message(chat_id, f"📝 Сводка за сутки:\n\n{summary}")
-
-{summary}")
     except Exception as e:
         logging.error(f"Ошибка саммари: {e}")
         await bot.send_message(chat_id, "⚠️ Не удалось создать саммари.")
