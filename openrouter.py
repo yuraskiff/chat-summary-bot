@@ -1,30 +1,47 @@
-import os
 import httpx
-from dotenv import load_dotenv
+import logging
 
-load_dotenv()
+# Настройка логгера
+logger = logging.getLogger(__name__)
 
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+# Название модели
+MODEL = "openchat/openchat-3.5"
 
-async def summarize_chat(messages):
-    prompt = "\n".join(messages) + "\n\nСделай веселое и интересное саммари этого чата:"
+# URL OpenRouter API
+API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+async def summarize_chat(chat_history: list[str], api_key: str) -> str:
+    """
+    Отправляет чат в OpenRouter и возвращает саммари.
+    :param chat_history: Список сообщений в чате
+    :param api_key: API-ключ от OpenRouter
+    :return: Строка-саммари
+    """
+    messages = [
+        {"role": "system", "content": "Сделай краткое, весёлое и интересное саммари этого чата."},
+    ] + [{"role": "user", "content": msg} for msg in chat_history]
+
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "HTTP-Referer": "https://yourdomain.com",
+        "Authorization": f"Bearer {api_key}",
+        "HTTP-Referer": "https://yourdomain.com",  # можно указать свой сайт, не обязательно
         "X-Title": "Chat Summary Bot"
     }
-    body = {
-        "model": "openchat/openchat-3.5",
-        "messages": [
-            {"role": "system", "content": "Ты бот, который создает юмористическое саммари беседы."},
-            {"role": "user", "content": prompt}
-        ]
+
+    payload = {
+        "model": MODEL,
+        "messages": messages,
     }
 
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post("https://openrouter.ai/api/v1/chat/completions", json=body, headers=headers)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(API_URL, json=payload, headers=headers, timeout=30.0)
             response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except httpx.HTTPStatusError as exc:
-            return f"OpenRouter error: {exc}"
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"OpenRouter error: {e.response.status_code} - {e.response.text}")
+        return "⚠️ Ошибка от OpenRouter API. Проверьте API-ключ и модель."
+    except Exception as e:
+        logger.exception("Ошибка при попытке получить саммари")
+        return "⚠️ Ошибка при генерации саммари."
