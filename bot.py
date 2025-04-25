@@ -25,23 +25,27 @@ async def handle_message(message: Message):
 
 @router.message(F.text == "/start")
 async def manual_summary(message: Message):
-    await send_summary(message.chat.id)
+    await send_summary(message.bot, message.chat.id)
 
-async def send_summary(chat_id: int):
+async def send_summary(bot: Bot, chat_id: int = None):
+    if chat_id is None:
+        chat_id = int(os.getenv("CHAT_ID", ""))
     since = datetime.utcnow() - timedelta(days=1)
     messages = await get_messages_for_summary(since)
     if not messages:
-        await dp.bot.send_message(chat_id, "Нет сообщений за последние 24 часа.")
+        await bot.send_message(chat_id, "Нет сообщений за последние 24 часа.")
         return
     try:
         text_blocks = [f"{msg['username']}: {msg['text']}" for msg in messages]
         summary = await summarize_chat(text_blocks)
-        await dp.bot.send_message(chat_id, f"📝 Сводка за сутки:\n\n{summary}")
+        await bot.send_message(chat_id, f"📝 Сводка за сутки:
+
+{summary}")
     except Exception as e:
         logging.error(f"Ошибка саммари: {e}")
-        await dp.bot.send_message(chat_id, "⚠️ Не удалось создать саммари.")
+        await bot.send_message(chat_id, "⚠️ Не удалось создать саммари.")
 
-def schedule_daily_summary():
+def schedule_daily_summary(bot: Bot):
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(send_summary, 'cron', hour=23, minute=59, args=[os.getenv("CHAT_ID", "")])
+    scheduler.add_job(send_summary, 'cron', hour=23, minute=59, args=[bot])
     scheduler.start()
