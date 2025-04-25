@@ -1,10 +1,9 @@
 import asyncio
-from aiogram import Dispatcher
-from bot import dp, bot
-from db import init_db
+from aiogram import Bot, Dispatcher
+from bot import dp, bot  # Импортируем уже созданные bot и dp из bot.py
 
 async def main():
-    await init_db()
+    print("🤖 Бот запускается...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
