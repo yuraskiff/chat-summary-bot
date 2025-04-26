@@ -1,6 +1,6 @@
 services:
-  - type: web
-    name: telegram-bot
+  - type: worker
+    name: telegram-bot-worker
     env: python
     plan: free
     branch: main
