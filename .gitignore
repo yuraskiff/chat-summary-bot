@@ -1,31 +1,14 @@
-# Python
 __pycache__/
 *.py[cod]
-*.egg-info/
 dist/
 build/
-
-# Env
+*.egg-info/
 .env
-.env.local
 .env.*
-
-# IDE / редакторы
 .vscode/
 .idea/
-*.swp
-
-# Тестовые артефакты
 .pytest_cache/
 .coverage
-htmlcov/
-
-# Логи
 *.log
-
-# СУБД-файлы
 *.sqlite3
-*.db
-
-# MacOS
 .DS_Store
