@@ -1,4 +1,3 @@
-
 import os
 import logging
 from dotenv import load_dotenv
@@ -17,3 +16,4 @@ def get_env_variable(var_name):
 BOT_TOKEN = get_env_variable('BOT_TOKEN')
 DATABASE_URL = get_env_variable('DATABASE_URL')
 OPENROUTER_API_KEY = get_env_variable('OPENROUTER_API_KEY')
+ADMIN_CHAT_ID = int(get_env_variable('ADMIN_CHAT_ID'))
