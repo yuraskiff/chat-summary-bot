@@ -1,36 +1,34 @@
 import httpx
-import os
+import textwrap
 from config import OPENROUTER_API_KEY
 
-MODEL = "meta-llama/llama-3.1-8b-instruct:free"
+MODEL   = "meta-llama/llama-3.1-8b-instruct:free"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
+TIMEOUT = httpx.Timeout(10.0, read=60.0)
 
 async def summarize_chat(chat_history: list[str]) -> str:
-    prompt = (
-        "Собери сообщения за последние 24 часа и сделай заключение, которое состоит из следующей информации:\n\n"
-        "- Какие темы обсуждались\n"
-        "- Какие собеседники были полезны и почему\n"
-        "- Какие собеседники были бесполезны и почему\n"
-        "- Какие хорошие и плохие стороны у беседы\n"
-        "- Кто чаще всех писал\n"
-        "- Психологический портрет всех участников\n"
-        "- Предложение новой темы\n\n"
-        "Используй свободный стиль.\n\n"
-        + "\n".join(chat_history)
-    )
+    system_msg = "Ты — помощник для анализа чатов."
+    user_prompt = textwrap.dedent("""
+        Собери сообщения за последние 24 часа и сделай заключение, которое состоит из следующей информации:
 
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}"
-    }
+        - Какие темы обсуждались
+        - Какие собеседники были полезны и почему
+        - Какие собеседники были бесполезны и почему
+        - Какие хорошие и плохие стороны у беседы
+        - Кто чаще всех писал
+        - Психологический портрет всех участников
+        - Предложение новой темы
 
-    body = {
-        "model": MODEL,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
-    }
+        Используй свободный стиль.
+    """).strip()
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(API_URL, json=body, headers=headers)
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user",   "content": f"{user_prompt}\n\n{'\n'.join(chat_history)}"}
+    ]
+    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}"}
+
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(API_URL, json={"model": MODEL, "messages": messages}, headers=headers)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
