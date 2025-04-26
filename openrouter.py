@@ -22,9 +22,12 @@ async def summarize_chat(chat_history: list[str]) -> str:
         Используй свободный стиль.
     """).strip()
 
+    # Собираем всю историю в одну строку, чтобы избежать backslash в f-string
+    chat_text = "\n".join(chat_history)
+
     messages = [
         {"role": "system", "content": system_msg},
-        {"role": "user",   "content": f"{user_prompt}\n\n{'\n'.join(chat_history)}"}
+        {"role": "user",   "content": f"{user_prompt}\n\n{chat_text}"}
     ]
     headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}"}
 
