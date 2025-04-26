@@ -1,4 +1,3 @@
-
 import httpx
 import logging
 from config.config import OPENROUTER_API_KEY
