@@ -1,4 +1,3 @@
-
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 import logging
 
