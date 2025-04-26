@@ -1,4 +1,3 @@
-
 from aiogram import Router, types
 from aiogram.filters import Command
 from bot.utils.helpers import greet_user
