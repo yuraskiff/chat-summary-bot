@@ -23,7 +23,8 @@ async def daily_job():
         msgs = await fetch(
             "SELECT content FROM messages WHERE chat_id=$1 "
             "AND created_at > now() - interval '24 hours' "
-            "ORDER BY created_at;", chat_id
+            "ORDER BY created_at;",
+            chat_id
         )
         texts = [r["content"] for r in msgs]
         # Получаем тип из настроек
@@ -31,7 +32,6 @@ async def daily_job():
         summary_type = st[0]["value"] if st else DEFAULT_SUMMARY_TYPE
         summary = await generate_summary(texts, summary_type)
         if summary:
-            # Отправляем администратору
             await bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
                 text=f"Сводка по чату {chat_id}:\n\n{summary}"
@@ -40,6 +40,10 @@ async def daily_job():
 async def main():
     # Инициализация подключения к БД
     await init_pool()
+
+    # Удаляем любые установленные вебхуки и очищаем очередь getUpdates
+    await bot.delete_webhook(drop_pending_updates=True)
+
     # Настройка планировщика
     scheduler = AsyncIOScheduler()
     scheduler.add_job(daily_job, "cron", hour=0, minute=0)
