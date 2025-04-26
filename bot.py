@@ -42,8 +42,7 @@ async def send_summary(bot: Bot, chat_id: int = None):
         await bot.send_message(chat_id, f"📝 Сводка за сутки:\n\n{summary}")
     except Exception as e:
         logging.error(f"Ошибка саммари: {e}")
-        await bot.send_message(chat_id, "⚠️ Не удалось создать саммари.")
-
+        await bot.send_message(chat_id, f"⚠️ Ошибка саммари: {e}")
 
 def schedule_daily_summary(bot: Bot):
     scheduler = AsyncIOScheduler()
