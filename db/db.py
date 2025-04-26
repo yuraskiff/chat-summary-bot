@@ -21,32 +21,34 @@ async def close_pool():
         logging.info("Database pool closed successfully.")
 
 async def _create_tables():
-    sql = [
-        """
+    async with pool.acquire() as conn:
+        # создаём таблицы, если отсутствуют
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS chats (
             chat_id BIGINT PRIMARY KEY
         );
-        """,
-        """
+        """)
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             id SERIAL PRIMARY KEY,
-            chat_id BIGINT REFERENCES chats(chat_id),
             user_id BIGINT,
             user_name TEXT,
             content TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
         );
-        """,
-        """
+        """)
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
         );
-        """
-    ]
-    async with pool.acquire() as conn:
-        for q in sql:
-            await conn.execute(q)
+        """)
+        # миграция: добавляем chat_id в сообщения, если его нет
+        await conn.execute("""
+        ALTER TABLE messages
+        ADD COLUMN IF NOT EXISTS chat_id BIGINT
+        REFERENCES chats(chat_id);
+        """)
 
 async def execute(query: str, *args):
     try:
