@@ -1,4 +1,3 @@
-
 import asyncpg
 import logging
 from config.config import DATABASE_URL
