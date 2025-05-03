@@ -13,68 +13,46 @@ from bot.middleware.auth_middleware import AuthMiddleware
 from config.config import BOT_TOKEN, WEBHOOK_URL, PORT
 from db.db import init_pool, close_pool
 
-# --- Настройка логирования ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("aiogram.client.session").setLevel(logging.ERROR)
 
-# --- Создаём бота и диспетчер ---
 bot = Bot(BOT_TOKEN, parse_mode="HTML")
-dp  = Dispatcher()
-
-# Регистрируем middleware и роутеры
+dp = Dispatcher()
 dp.message.middleware(AuthMiddleware())
 dp.include_router(user_router)
 dp.include_router(chat_router)
 dp.include_router(admin_router)
 
-# --- aiohttp-приложение для webhook ---
 app = web.Application()
+SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=f"/webhook/{BOT_TOKEN}")
 
-# Точка входа для Telegram: /webhook/{BOT_TOKEN}
-SimpleRequestHandler(dispatcher=dp, bot=bot).register(
-    app, path=f"/webhook/{BOT_TOKEN}"
-)
-
-# --- Функции старта и остановки ---
 async def on_startup(app: web.Application):
-    # Инициализируем пул БД и планировщик автосводок
     await init_pool()
     setup_scheduler(dp)
 
-    # Логируем полученный WEBHOOK_URL
     logging.info("▶ Полученный WEBHOOK_URL: %s", WEBHOOK_URL)
-
-    # Устанавливаем webhook в Telegram
     await bot.set_webhook(WEBHOOK_URL)
     logging.info("🚀 Webhook установлен: %s", WEBHOOK_URL)
 
-async def on_shutdown(app: web.Application):
-    # Удаляем webhook
-    await bot.delete_webhook()
+    info = await bot.get_webhook_info()
+    logging.info("🔍 WebhookInfo: %s", info.to_python())
 
-    # Останавливаем планировщик
+async def on_shutdown(app: web.Application):
+    await bot.delete_webhook()
     sched = dp.get("scheduler")
     if sched:
         sched.shutdown()
-
-    # Закрываем пул и сессию бота
     await close_pool()
     try:
         await bot.session.close()
     except AttributeError:
         session = await bot.get_session()
         await session.close()
-
     logging.info("🛑 Шатдаун завершён")
 
-# Привязываем события к aiohttp-приложению
 app.on_startup.append(on_startup)
 app.on_cleanup.append(on_shutdown)
 
-# --- Запуск aiohttp-сервера ---
 if __name__ == "__main__":
     host = "0.0.0.0"
     logging.info("Запуск aiohttp на %s:%d …", host, PORT)
