@@ -95,16 +95,30 @@ async def cmd_pdf(message: Message):
 
 
 async def send_summary(bot: Bot, chat_id: int):
-    """Вспомогательная: собирает за сутки, спрашивает модель, шлёт сводку."""
+    """Собирает за сутки, спрашивает модель, шлёт сводку."""
+    from datetime import datetime, timedelta, timezone
+
     since = datetime.now(timezone.utc) - timedelta(days=1)
     msgs = await get_messages_for_summary(chat_id, since)
+
+    print(f"📥 Получено сообщений: {len(msgs)} для чата {chat_id}")
+
     if not msgs:
         await bot.send_message(chat_id, "Нет сообщений за последние 24 часа.")
         return
 
     blocks = [f"{m['username']}: {m['text']}" for m in msgs]
     prompt = await get_setting("summary_prompt")
-    summary = await summarize_chat(blocks, prompt)
+
+    print(f"⏳ Отправляем {len(blocks)} сообщений в summarize_chat...")
+
+    try:
+        summary = await summarize_chat(blocks, prompt)
+    except Exception as e:
+        print(f"❌ Ошибка при summarize_chat: {e}")
+        await bot.send_message(chat_id, f"❌ Ошибка при запросе сводки: {e}")
+        return
+
     if not summary:
         await bot.send_message(chat_id, "Не удалось получить сводку.")
         return
