@@ -31,7 +31,7 @@ async def cmd_summary(message: Message):
 async def cmd_set_prompt(message: Message):
     """
     /set_prompt <текст> — меняет шаблон сводки.
-    Доступно только администратору (по user_id).
+    Доступно только администратору.
     """
     if message.from_user.id != ADMIN_CHAT_ID:
         return
@@ -123,7 +123,7 @@ async def send_summary(bot: Bot, chat_id: int):
 
 def setup_scheduler(dp):
     """
-    Инициализация и запуск планировщика автосводок.
+    Инициализация планировщика автосводок.
     """
     scheduler = AsyncIOScheduler(timezone="Europe/Tallinn")
     scheduler.add_job(
