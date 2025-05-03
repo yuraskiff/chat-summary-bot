@@ -94,8 +94,7 @@ async def get_chat_ids_for_summary(since=None) -> list[int]:
 
 async def get_messages_for_summary(chat_id: int, since) -> list[dict]:
     try:
-        if since.tzinfo is None or since.tzinfo.utcoffset(since) is None:
-            since = since.replace(tzinfo=timezone.utc)
+       since = since.astimezone(timezone.utc)
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(
