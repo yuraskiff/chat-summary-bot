@@ -5,26 +5,37 @@ from config.config import DATABASE_URL
 pool: asyncpg.Pool | None = None
 
 async def init_pool():
+    """
+    Инициализирует пул подключений и создаёт нужные таблицы:
+      - messages для хранения сообщений,
+      - settings для пользовательских шаблонов,
+      - chats для списка всех чатов.
+    """
     global pool
     try:
         pool = await asyncpg.create_pool(DATABASE_URL)
         logging.info("Database pool initialized successfully.")
-        # Создаём таблицы, если их нет
         async with pool.acquire() as conn:
             # Таблица сообщений
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
-                    chat_id BIGINT NOT NULL,
-                    username TEXT NOT NULL,
-                    text TEXT NOT NULL,
-                    timestamp TIMESTAMPTZ NOT NULL
+                    chat_id      BIGINT       NOT NULL,
+                    username     TEXT         NOT NULL,
+                    text         TEXT         NOT NULL,
+                    timestamp    TIMESTAMPTZ  NOT NULL
                 );
             """)
             # Таблица настроек
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
+                    key   TEXT PRIMARY KEY,
+                    value TEXT         NOT NULL
+                );
+            """)
+            # Таблица зарегистрированных чатов
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS chats (
+                    chat_id BIGINT PRIMARY KEY
                 );
             """)
     except Exception as e:
@@ -32,12 +43,18 @@ async def init_pool():
         raise
 
 async def close_pool():
+    """
+    Закрывает пул подключений к БД.
+    """
     global pool
     if pool:
         await pool.close()
         logging.info("Database pool closed successfully.")
 
 async def save_message(chat_id: int, username: str, text: str, timestamp):
+    """
+    Сохраняет пользовательское сообщение в таблицу messages.
+    """
     try:
         async with pool.acquire() as conn:
             await conn.execute(
@@ -47,21 +64,56 @@ async def save_message(chat_id: int, username: str, text: str, timestamp):
     except Exception as e:
         logging.error(f"Error saving message: {e}")
 
+async def register_chat(chat_id: int):
+    """
+    Регистрирует новый чат в таблице chats.
+    Повторная регистрация не создаст дубликата (ON CONFLICT DO NOTHING).
+    """
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO chats(chat_id) VALUES($1) ON CONFLICT DO NOTHING",
+                chat_id
+            )
+    except Exception as e:
+        logging.error(f"Error registering chat: {e}")
+
+async def get_registered_chats() -> list[int]:
+    """
+    Возвращает список всех chat_id из таблицы chats.
+    """
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT chat_id FROM chats")
+        return [r["chat_id"] for r in rows]
+    except Exception as e:
+        logging.error(f"Error fetching registered chats: {e}")
+        return []
+
 async def get_chat_ids_for_summary(since=None) -> list[int]:
+    """
+    Возвращает список всех DISTINCT chat_id из messages,
+    опционально фильтруя по дате (timestamp >= since).
+    """
     try:
         async with pool.acquire() as conn:
             if since:
                 rows = await conn.fetch(
-                    "SELECT DISTINCT chat_id FROM messages WHERE timestamp >= $1", since
+                    "SELECT DISTINCT chat_id FROM messages WHERE timestamp >= $1",
+                    since
                 )
             else:
                 rows = await conn.fetch("SELECT DISTINCT chat_id FROM messages")
         return [r["chat_id"] for r in rows]
     except Exception as e:
-        logging.error(f"Error fetching chat IDs: {e}")
+        logging.error(f"Error fetching chat IDs for summary: {e}")
         return []
 
 async def get_messages_for_summary(chat_id: int, since) -> list[dict]:
+    """
+    Возвращает список сообщений для конкретного chat_id,
+    где timestamp >= since, упорядоченных по возрастанию.
+    """
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -78,10 +130,13 @@ async def get_messages_for_summary(chat_id: int, since) -> list[dict]:
             for r in rows
         ]
     except Exception as e:
-        logging.error(f"Error fetching messages: {e}")
+        logging.error(f"Error fetching messages for summary: {e}")
         return []
 
 async def get_setting(key: str) -> str | None:
+    """
+    Возвращает значение настройки по ключу из таблицы settings.
+    """
     try:
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT value FROM settings WHERE key = $1", key)
@@ -91,6 +146,9 @@ async def get_setting(key: str) -> str | None:
         return None
 
 async def set_setting(key: str, value: str):
+    """
+    Устанавливает или обновляет настройку в таблице settings.
+    """
     try:
         async with pool.acquire() as conn:
             await conn.execute(
