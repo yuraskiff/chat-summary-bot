@@ -60,12 +60,12 @@ async def save_message(chat_id: int, username: str, text: str, timestamp):
 
         async with pool.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO messages(chat_id, username, text, timestamp)
-                VALUES($1, $2, $3, $4)
-                """,
-                chat_id, username, text, timestamp
-            )
+    """
+    INSERT INTO messages(chat_id, username, text, timestamp)
+    VALUES($1, $2, $3, $4::timestamptz)
+    """,
+    chat_id, username, text, timestamp
+)
 
     except Exception as e:
         logging.error(f"❌ Error saving message: {e}")
