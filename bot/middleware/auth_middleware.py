@@ -1,11 +1,29 @@
-from aiogram.dispatcher.middlewares.base import BaseMiddleware
-import logging
+from aiogram import BaseMiddleware
+from aiogram.types import Message
 from config.config import ADMIN_CHAT_ID
 
 class AuthMiddleware(BaseMiddleware):
+    """
+    Middleware, которое пускает все сообщения и команду /summary,
+    но блокирует выполнение админ-команд (/chats, /pdf, /set_prompt)
+    для всех пользователей, кроме ADMIN_CHAT_ID.
+    """
     async def __call__(self, handler, event, data):
-        user_id = event.from_user.id
-        if user_id == ADMIN_CHAT_ID:
+        message: Message = data.get("message")
+        # Если нет текстового сообщения — пропускаем дальше
+        if not message or not message.text:
             return await handler(event, data)
-        logging.warning(f"Unauthorized access attempt by user_id: {user_id}")
-        await event.answer("У вас нет доступа.")
+
+        text = message.text.lstrip().lower()
+
+        # Админ-команды, к которым нужен доп. допуск
+        admin_commands = ("/chats", "/pdf", "/set_prompt")
+
+        # Если это одна из админ-команд
+        if any(text.startswith(cmd) for cmd in admin_commands):
+            # и не наш админ — просто игнорируем
+            if message.from_user.id != ADMIN_CHAT_ID:
+                return
+
+        # Всё остальное (включая /summary и обычные тексты) обрабатываем
+        return await handler(event, data)
