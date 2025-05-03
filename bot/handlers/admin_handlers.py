@@ -1,4 +1,3 @@
-import re
 import io
 from datetime import datetime, timedelta, timezone
 
@@ -20,11 +19,10 @@ from config.config import ADMIN_CHAT_ID
 
 router = Router()
 
-@router.message(lambda m: m.text is not None and re.match(r"^/summary(@\w+)?($|\s)", m.text))
+@router.message(lambda m: m.text is not None and m.text.lower().startswith("/summary"))
 async def cmd_summary(message: Message):
     """
-    /summary или /summary@BotUsername — моментальная сводка по текущему чату.
-    Работает для всех пользователей.
+    Поймает и /summary, и /summary@BotUsername (любые регистры и упоминания).
     """
     await send_summary(message.bot, message.chat.id)
 
