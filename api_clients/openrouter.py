@@ -9,10 +9,9 @@ API_URL = "https://api.openrouter.ai/api/v1/chat/completions"
 TIMEOUT = httpx.Timeout(10.0, read=60.0)
 
 async def summarize_chat(chat_history: list[str], user_prompt: str | None = None) -> str | None:
-    """
-    Собирает историю чата и отправляет её на модель DeepSeek.
-    Возвращает текст сводки или None при ошибке.
-    """
+    # Вот первая строка — теперь мы точно увидим вызов функции
+    logging.info("🔔 summarize_chat вызван: history_len=%d, prompt задан=%s", len(chat_history), bool(user_prompt))
+
     system_msg = "Ты — помощник для анализа чатов."
     default_prompt = textwrap.dedent("""
         Собери сообщения за последние 24 часа и сделай заключение, которое состоит из:
@@ -41,14 +40,12 @@ async def summarize_chat(chat_history: list[str], user_prompt: str | None = None
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(API_URL, json={"model": MODEL, "messages": messages}, headers=headers)
             resp.raise_for_status()
-            # Берём JSON асинхронно и логируем всю структуру
             data = await resp.json()
-            logging.info("OpenRouter ответ: %s", data)
-            # Извлекаем текст из choices
+            logging.info("✅ OpenRouter ответ: %s", data)
             return data["choices"][0]["message"]["content"]
     except httpx.HTTPError as e:
-        logging.error("OpenRouter request error: %s", e)
+        logging.error("❌ OpenRouter request error: %s", e)
         return None
     except Exception as e:
-        logging.error("Ошибка обработки ответа OpenRouter: %s", e)
+        logging.error("❌ Ошибка обработки ответа OpenRouter: %s", e)
         return None
