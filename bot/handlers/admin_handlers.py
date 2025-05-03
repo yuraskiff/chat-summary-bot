@@ -21,7 +21,6 @@ router = Router()
 
 @router.message(Command("set_prompt"))
 async def cmd_set_prompt(message: Message):
-    """Меняет шаблон сводки — только для администратора."""
     if message.from_user.id != ADMIN_CHAT_ID:
         return
 
@@ -35,7 +34,6 @@ async def cmd_set_prompt(message: Message):
 
 @router.message(Command("chats"))
 async def cmd_chats(message: Message):
-    """Показывает все зарегистрированные чаты — только для администратора."""
     if message.from_user.id != ADMIN_CHAT_ID:
         return
 
@@ -57,7 +55,6 @@ async def cmd_chats(message: Message):
 
 @router.message(Command("pdf"))
 async def cmd_pdf(message: Message):
-    """Генерирует PDF-отчёт за последние 24 часа — только для администратора."""
     if message.from_user.id != ADMIN_CHAT_ID:
         return
 
@@ -94,10 +91,14 @@ async def cmd_pdf(message: Message):
     await message.reply_document(buf, filename=f"history_{cid}.pdf")
 
 
-async def send_summary(bot: Bot, chat_id: int):
-    """Собирает за сутки, спрашивает модель, шлёт сводку."""
-    from datetime import datetime, timedelta, timezone
+@router.message(Command("summary"))
+async def cmd_summary(message: Message):
+    """Создаёт саммари по сообщениям за сутки. Доступна всем."""
+    chat_id = message.chat.id
+    await send_summary(message.bot, chat_id)
 
+
+async def send_summary(bot: Bot, chat_id: int):
     since = datetime.now(timezone.utc) - timedelta(days=1)
     msgs = await get_messages_for_summary(chat_id, since)
 
@@ -127,7 +128,6 @@ async def send_summary(bot: Bot, chat_id: int):
 
 
 def setup_scheduler(dp):
-    """Планировщик автосводок на 23:59 Europe/Tallinn."""
     scheduler = AsyncIOScheduler(timezone="Europe/Tallinn")
     scheduler.add_job(
         lambda: dp.loop.create_task(send_all_summaries(dp.bot)),
@@ -140,12 +140,6 @@ def setup_scheduler(dp):
 
 
 async def send_all_summaries(bot: Bot):
-    """Ежедневная рассылка всем зарегистрированным чатам."""
     since = datetime.now(timezone.utc) - timedelta(days=1)
     for cid in await get_registered_chats():
         await send_summary(bot, cid)
-
-@router.message(Command("summary"))
-async def cmd_summary(message: Message):
-    """Отправляет сводку — доступно всем участникам чатов."""
-    await send_summary(message.bot, message.chat.id)
