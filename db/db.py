@@ -88,6 +88,9 @@ async def get_chat_ids_for_summary(since=None) -> list[int]:
 
 async def get_messages_for_summary(chat_id: int, since) -> list[dict]:
     try:
+        from datetime import timezone
+        since = since.replace(tzinfo=timezone.utc)  # <== вот это добавь
+
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
