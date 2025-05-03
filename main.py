@@ -9,36 +9,45 @@ from bot.handlers.admin_handlers import router as admin_router, setup_scheduler
 from bot.middleware.auth_middleware import AuthMiddleware
 
 async def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    # Настройка логирования
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+
+    # Инициализация бота и диспетчера
     bot = Bot(BOT_TOKEN, parse_mode="HTML")
     dp = Dispatcher()
 
-    # Инициализация БД
+    # Инициализация подключения к базе данных
     await init_pool()
 
-    # Роутеры и middleware
+    # Регистрируем хендлеры и middleware
     dp.include_router(user_router)
     dp.include_router(admin_router)
     dp.message.middleware(AuthMiddleware())
 
-    # Запуск фоновых сводок
+    # Запускаем планировщик автосводок
     setup_scheduler(dp)
 
-    # Сбрасываем webhook (если он был) и очищаем очередь апдейтов
+    # Удаляем возможный Webhook и сбрасываем все накопленные апдейты
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info("Webhook deleted and pending updates dropped.")
 
     try:
         logging.info("Bot is starting polling...")
-        await dp.start_polling(bot)
+        # Запускаем polling и пропускаем все старые апдейты
+        await dp.start_polling(bot, skip_updates=True)
     finally:
-        # Останов scheduler
+        # Останавливаем планировщик
         sched = dp.get('scheduler')
         if sched:
             sched.shutdown()
-        # Закрытие БД
+
+        # Закрываем пул базы данных
         await close_pool()
-        # Закрытие HTTP-сессии бота
+
+        # Закрываем HTTP-сессию бота
         session = await bot.get_session()
         await session.close()
         logging.info("Bot stopped successfully.")
