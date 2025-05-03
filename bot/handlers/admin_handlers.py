@@ -98,8 +98,16 @@ async def cmd_summary(message: Message):
     await send_summary(message.bot, chat_id)
 
 
+from datetime import datetime, timedelta, timezone
+
 async def send_summary(bot: Bot, chat_id: int):
+    """Собирает за сутки, спрашивает модель, шлёт сводку."""
     since = datetime.now(timezone.utc) - timedelta(days=1)
+
+    # Подстраховка — убеждаемся, что timezone-aware
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+
     msgs = await get_messages_for_summary(chat_id, since)
 
     print(f"📥 Получено сообщений: {len(msgs)} для чата {chat_id}")
@@ -125,7 +133,6 @@ async def send_summary(bot: Bot, chat_id: int):
         return
 
     await bot.send_message(chat_id, f"📝 Сводка за сутки:\n\n{summary}")
-
 
 def setup_scheduler(dp):
     scheduler = AsyncIOScheduler(timezone="Europe/Tallinn")
