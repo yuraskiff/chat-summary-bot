@@ -28,5 +28,5 @@ async def handle_message(message: types.Message):
             chat_id=message.chat.id,
             username=message.from_user.username or message.from_user.full_name,
             text=text_to_save,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc)  # вот здесь исправлено
         )
