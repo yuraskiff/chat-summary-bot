@@ -144,3 +144,8 @@ async def send_all_summaries(bot: Bot):
     since = datetime.now(timezone.utc) - timedelta(days=1)
     for cid in await get_registered_chats():
         await send_summary(bot, cid)
+
+@router.message(Command("summary"))
+async def cmd_summary(message: Message):
+    """Отправляет сводку — доступно всем участникам чатов."""
+    await send_summary(message.bot, message.chat.id)
