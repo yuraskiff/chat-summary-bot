@@ -9,9 +9,10 @@ API_URL = "https://api.openrouter.ai/api/v1/chat/completions"
 TIMEOUT = httpx.Timeout(10.0, read=60.0)
 
 async def summarize_chat(chat_history: list[str], user_prompt: str | None = None) -> str | None:
-    # Вот первая строка — теперь мы точно увидим вызов функции
-    logging.info("🔔 summarize_chat вызван: history_len=%d, prompt задан=%s", len(chat_history), bool(user_prompt))
-
+    """
+    Собирает историю чата и отправляет её на модель DeepSeek.
+    Возвращает текст сводки или None при ошибке.
+    """
     system_msg = "Ты — помощник для анализа чатов."
     default_prompt = textwrap.dedent("""
         Собери сообщения за последние 24 часа и сделай заключение, которое состоит из:
@@ -27,6 +28,12 @@ async def summarize_chat(chat_history: list[str], user_prompt: str | None = None
     prompt = user_prompt or default_prompt
     chat_text = "\n".join(chat_history)
 
+    # Лог до запроса
+    logging.info(
+        "🔔 summarize_chat вызван: history_len=%d, custom_prompt=%s",
+        len(chat_history), bool(user_prompt)
+    )
+
     messages = [
         {"role": "system", "content": system_msg},
         {"role": "user",   "content": f"{prompt}\n\n{chat_text}"}
@@ -40,12 +47,14 @@ async def summarize_chat(chat_history: list[str], user_prompt: str | None = None
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(API_URL, json={"model": MODEL, "messages": messages}, headers=headers)
             resp.raise_for_status()
-            data = await resp.json()
-            logging.info("✅ OpenRouter ответ: %s", data)
-            return data["choices"][0]["message"]["content"]
-    except httpx.HTTPError as e:
-        logging.error("❌ OpenRouter request error: %s", e)
-        return None
+            data = resp.json()
+            summary = data["choices"][0]["message"]["content"]
+        # Лог после
+        snippet = summary.replace("\n", " ")
+        snippet = snippet[:100] + ("…" if len(snippet) > 100 else "")
+        logging.info("✅ OpenRouter ответ: %s", snippet)
+        return summary
+
     except Exception as e:
-        logging.error("❌ Ошибка обработки ответа OpenRouter: %s", e)
+        logging.error("❌ OpenRouter ошибка: %s", e)
         return None
