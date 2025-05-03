@@ -23,7 +23,7 @@ router = Router()
 async def cmd_summary(message: Message):
     """
     /summary — моментальная сводка по текущему чату.
-    Работает в личке и в группах.
+    Работает у всех пользователей.
     """
     await send_summary(message.bot, message.chat.id)
 
@@ -31,25 +31,23 @@ async def cmd_summary(message: Message):
 async def cmd_set_prompt(message: Message):
     """
     /set_prompt <текст> — меняет шаблон сводки.
-    Только в личном чате с ADMIN_CHAT_ID.
+    Только вы (по своему user_id) можете вызывать эту команду.
     """
-    if message.chat.id != ADMIN_CHAT_ID:
+    if message.from_user.id != ADMIN_CHAT_ID:
         return
-
     new_prompt = message.get_args().strip()
     if not new_prompt:
         return await message.reply("❗️ Укажите новый шаблон после команды.")
-
     await set_setting("summary_prompt", new_prompt)
     await message.reply("✅ Шаблон сводки обновлён.")
 
 @router.message(Command("chats"))
 async def cmd_chats(message: Message):
     """
-    /chats — список всех chat_id, где есть сохранённые сообщения.
-    Только в личном чате.
+    /chats — список chat_id, где есть сохранённые сообщения.
+    Команда только для вас.
     """
-    if message.chat.id != ADMIN_CHAT_ID:
+    if message.from_user.id != ADMIN_CHAT_ID:
         return
 
     ids = [cid for cid in await get_chat_ids_for_summary(None) if cid is not None]
@@ -71,9 +69,9 @@ async def cmd_chats(message: Message):
 async def cmd_pdf(message: Message):
     """
     /pdf <chat_id> — PDF-отчёт за последние 24 часа.
-    Только в личном чате.
+    Только вы.
     """
-    if message.chat.id != ADMIN_CHAT_ID:
+    if message.from_user.id != ADMIN_CHAT_ID:
         return
 
     parts = message.get_args().split()
@@ -108,24 +106,22 @@ async def cmd_pdf(message: Message):
 
 async def send_summary(bot: Bot, chat_id: int):
     """
-    Вспомогательная функция для отправки сводки за 24 часа.
+    Вспомогательная функция: делает сводку за 24 часа и отправляет её.
     """
     since = datetime.utcnow() - timedelta(days=1)
     msgs = await get_messages_for_summary(chat_id, since)
     if not msgs:
         return await bot.send_message(chat_id, "Нет сообщений за последние 24 часа.")
-
     blocks = [f"{m['username']}: {m['text']}" for m in msgs]
     prompt = await get_setting("summary_prompt")
     summary = await summarize_chat(blocks, prompt)
     if not summary:
         return await bot.send_message(chat_id, "Не удалось получить сводку.")
-
     await bot.send_message(chat_id, f"📝 Сводка за сутки:\n\n{summary}")
 
 def setup_scheduler(dp):
     """
-    Запускает планировщик, который раз в сутки рассылает всем чатам автосводки.
+    Инициализация планировщика для ежедневных рассылок.
     """
     scheduler = AsyncIOScheduler(timezone="Europe/Tallinn")
     scheduler.add_job(
