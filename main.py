@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
-from aiogram import types
 from aiohttp import web
 
 from bot.handlers.user_handlers import router as user_router
@@ -44,8 +43,12 @@ async def health(request: web.Request) -> web.Response:
 # Сигналы старта и завершения
 async def on_startup(app: web.Application):
     # Инициализация БД
-    await init_pool()
-    logging.info("✅ Пул БД успешно инициализирован")
+    try:
+        await init_pool()
+        logging.info("✅ Пул БД успешно инициализирован")
+    except Exception as e:
+        logging.error(f"❌ Не удалось инициализировать БД: {e}")
+        return
 
     # Планировщик автосводок
     setup_scheduler(dp)
@@ -54,12 +57,21 @@ async def on_startup(app: web.Application):
     for route in app.router.routes():
         logging.info("Маршрут: %s %s -> %s", route.method, route.resource, route.handler)
 
-    # Устанавливаем webhook
+    # Формируем URL для webhook
+    host = os.getenv('RENDER_EXTERNAL_HOSTNAME') or os.getenv('WEBHOOK_HOST')
+    if not host:
+        logging.error("❌ Не задан хост для webhook (RENDER_EXTERNAL_HOSTNAME или WEBHOOK_HOST)")
+        return
     webhook_path = f"/webhook/{BOT_TOKEN}"
-    url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}{webhook_path}"
+    url = f"https://{host}{webhook_path}"
     logging.info("▶ Используем WEBHOOK_URL: %s", url)
-    await bot.set_webhook(url)
-    logging.info("🚀 Webhook установлен: %s", url)
+
+    # Устанавливаем webhook
+    try:
+        await bot.set_webhook(url)
+        logging.info("🚀 Webhook установлен: %s", url)
+    except Exception as e:
+        logging.error(f"❌ Не удалось установить webhook: {e}")
 
 async def on_shutdown(app: web.Application):
     # Сбрасываем webhook
@@ -67,7 +79,7 @@ async def on_shutdown(app: web.Application):
     # Закрываем БД и сессии
     await close_pool()
     await bot.session.close()
-    logging.info("Бот и БД корректно завершили работу")
+    logging.info("🛑 Бот и БД корректно завершили работу")
 
 # Создаем приложение aiohttp
 app = web.Application()
