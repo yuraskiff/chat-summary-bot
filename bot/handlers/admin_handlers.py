@@ -1,5 +1,5 @@
 import io
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Router, Bot
 from aiogram.types import Message
@@ -80,7 +80,7 @@ async def cmd_pdf(message: Message):
         return await message.reply("❗️ Укажите chat_id: `/pdf 123456789`")
 
     cid = int(parts[0])
-    since = datetime.utcnow() - timedelta(days=1)
+    since = datetime.now(timezone.utc) - timedelta(days=1)
     msgs = await get_messages_for_summary(cid, since)
     if not msgs:
         return await message.reply("Нет сообщений за последние 24 часа.")
@@ -91,7 +91,7 @@ async def cmd_pdf(message: Message):
     text_obj.setFont("Helvetica", 10)
 
     for m in msgs:
-        ts = m["timestamp"].strftime("%Y-%m-%d %H:%M")
+        ts = m["timestamp"].astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
         line = f"{ts} | {m['username']}: {m['text']}"
         text_obj.textLine(line[:1000])
         if text_obj.getY() < 40:
@@ -110,7 +110,7 @@ async def send_summary(bot: Bot, chat_id: int):
     Вспомогательная функция: собирает сообщения за последние 24 часа,
     запрашивает у модели сводку и отправляет её в чат.
     """
-    since = datetime.utcnow() - timedelta(days=1)
+    since = datetime.now(timezone.utc) - timedelta(days=1)
     msgs = await get_messages_for_summary(chat_id, since)
     if not msgs:
         return await bot.send_message(chat_id, "Нет сообщений за последние 24 часа.")
@@ -139,6 +139,6 @@ async def send_all_summaries(bot: Bot):
     """
     Отправляет всем зарегистрированным чатам суточную сводку.
     """
-    since = datetime.utcnow() - timedelta(days=1)
+    since = datetime.now(timezone.utc) - timedelta(days=1)
     for cid in await get_registered_chats():
         await send_summary(bot, cid)
