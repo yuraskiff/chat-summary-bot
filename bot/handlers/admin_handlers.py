@@ -102,7 +102,8 @@ from datetime import datetime, timedelta, timezone
 
 async def send_summary(bot: Bot, chat_id: int):
     """Собирает за сутки, спрашивает модель, шлёт сводку."""
-    since = datetime.now(timezone.utc) - timedelta(days=1)
+    since = datetime.now() - timedelta(days=1)
+    since = since.replace(tzinfo=timezone.utc)
 
     # Подстраховка — убеждаемся, что timezone-aware
     if since.tzinfo is None:
