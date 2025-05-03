@@ -22,15 +22,16 @@ router = Router()
 @router.message(Command("summary"))
 async def cmd_summary(message: Message):
     """
-    Команда /summary: присылает мгновенную сводку по текущему чату.
+    /summary — моментальная сводка по текущему чату.
+    Работает в личке и в группах.
     """
     await send_summary(message.bot, message.chat.id)
 
 @router.message(Command("set_prompt"))
 async def cmd_set_prompt(message: Message):
     """
-    Команда /set_prompt <текст>: меняет шаблон сводки.
-    Доступно только администратору.
+    /set_prompt <текст> — меняет шаблон сводки.
+    Только в личном чате с ADMIN_CHAT_ID.
     """
     if message.chat.id != ADMIN_CHAT_ID:
         return
@@ -45,45 +46,46 @@ async def cmd_set_prompt(message: Message):
 @router.message(Command("chats"))
 async def cmd_chats(message: Message):
     """
-    Команда /chats: показывает список chat_id всех чатов с сохранёнными сообщениями.
-    Доступно только администратору.
+    /chats — список всех chat_id, где есть сохранённые сообщения.
+    Только в личном чате.
     """
     if message.chat.id != ADMIN_CHAT_ID:
         return
 
-    ids = await get_chat_ids_for_summary(None)
+    ids = [cid for cid in await get_chat_ids_for_summary(None) if cid is not None]
+    if not ids:
+        return await message.reply("Нет активных чатов.")
+
     lines = []
     for cid in ids:
         try:
             info = await message.bot.get_chat(cid)
-            title = info.title or info.full_name
+            title = info.title or info.full_name or str(cid)
         except:
             title = str(cid)
         lines.append(f"{cid} — {title}")
 
-    text = "\n".join(lines) if lines else "Нет активных чатов."
-    await message.reply(f"Активные чаты:\n{text}")
+    await message.reply("Активные чаты:\n" + "\n".join(lines))
 
 @router.message(Command("pdf"))
 async def cmd_pdf(message: Message):
     """
-    Команда /pdf <chat_id>: генерирует PDF-отчёт за последние 24 часа для указанного чата.
-    Доступно только администратору.
+    /pdf <chat_id> — PDF-отчёт за последние 24 часа.
+    Только в личном чате.
     """
     if message.chat.id != ADMIN_CHAT_ID:
         return
 
-    args = message.get_args().split()
-    if not args or not args[0].isdigit():
+    parts = message.get_args().split()
+    if not parts or not parts[0].isdigit():
         return await message.reply("❗️ Укажите chat_id: `/pdf 123456789`")
 
-    cid = int(args[0])
-    since = datetime.utcnow() - timedelta(days=1)  # naive UTC datetime
+    cid = int(parts[0])
+    since = datetime.utcnow() - timedelta(days=1)
     msgs = await get_messages_for_summary(cid, since)
     if not msgs:
         return await message.reply("Нет сообщений за последние 24 часа.")
 
-    # Генерация PDF
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
     text_obj = c.beginText(40, 750)
@@ -106,10 +108,9 @@ async def cmd_pdf(message: Message):
 
 async def send_summary(bot: Bot, chat_id: int):
     """
-    Вспомогательная функция: собирает сообщения за последние 24 часа,
-    запрашивает сводку у модели и отправляет её в чат.
+    Вспомогательная функция для отправки сводки за 24 часа.
     """
-    since = datetime.utcnow() - timedelta(days=1)  # naive UTC datetime
+    since = datetime.utcnow() - timedelta(days=1)
     msgs = await get_messages_for_summary(chat_id, since)
     if not msgs:
         return await bot.send_message(chat_id, "Нет сообщений за последние 24 часа.")
@@ -124,23 +125,17 @@ async def send_summary(bot: Bot, chat_id: int):
 
 def setup_scheduler(dp):
     """
-    Инициализация и запуск планировщика, который каждый день в 23:59 по Europe/Tallinn
-    отправляет сводки во все активные чаты.
+    Запускает планировщик, который раз в сутки рассылает всем чатам автосводки.
     """
     scheduler = AsyncIOScheduler(timezone="Europe/Tallinn")
     scheduler.add_job(
         lambda: dp.loop.create_task(send_all_summaries(dp.bot)),
-        trigger="cron",
-        hour=23,
-        minute=59
+        trigger="cron", hour=23, minute=59
     )
     scheduler.start()
     dp['scheduler'] = scheduler
 
 async def send_all_summaries(bot: Bot):
-    """
-    Функция, которую вызывает планировщик: делает рассылку сводок всем чатам.
-    """
     since = datetime.utcnow() - timedelta(days=1)
     for cid in await get_chat_ids_for_summary(since):
         await send_summary(bot, cid)
