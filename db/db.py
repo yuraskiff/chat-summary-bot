@@ -6,15 +6,11 @@ from config.config import DATABASE_URL
 pool: asyncpg.Pool | None = None
 
 async def init_pool():
-    """
-    Инициализирует пул подключений и создаёт нужные таблицы.
-    """
     global pool
     try:
         pool = await asyncpg.create_pool(DATABASE_URL)
         logging.info("Database pool initialized successfully.")
         async with pool.acquire() as conn:
-            # Таблица сообщений
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     chat_id      BIGINT       NOT NULL,
@@ -23,14 +19,12 @@ async def init_pool():
                     timestamp    TIMESTAMPTZ  NOT NULL
                 );
             """)
-            # Таблица настроек
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     key   TEXT PRIMARY KEY,
                     value TEXT         NOT NULL
                 );
             """)
-            # Таблица зарегистрированных чатов
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS chats (
                     chat_id BIGINT PRIMARY KEY
@@ -41,39 +35,30 @@ async def init_pool():
         raise
 
 async def close_pool():
-    """
-    Закрывает пул подключений к БД.
-    """
     global pool
     if pool:
         await pool.close()
         logging.info("🛑 Database pool closed successfully.")
-        return
 
 async def save_message(chat_id: int, username: str, text: str, timestamp):
     try:
-        # Приводим timestamp к UTC, если он "наивный"
-        if timestamp.tzinfo is None:
+        if timestamp.tzinfo is None or timestamp.tzinfo.utcoffset(timestamp) is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
 
         logging.warning(f"[DEBUG] Saving message with timestamp: {timestamp} (tzinfo={timestamp.tzinfo})")
 
         async with pool.acquire() as conn:
             await conn.execute(
-    """
-    INSERT INTO messages(chat_id, username, text, timestamp)
-    VALUES($1, $2, $3, $4::timestamptz)
-    """,
-    chat_id, username, text, timestamp
-)
-
+                """
+                INSERT INTO messages(chat_id, username, text, timestamp)
+                VALUES($1, $2, $3, $4::timestamptz)
+                """,
+                chat_id, username, text, timestamp
+            )
     except Exception as e:
         logging.error(f"❌ Error saving message: {e}")
 
 async def register_chat(chat_id: int):
-    """
-    Регистрирует чат в таблице chats.
-    """
     try:
         async with pool.acquire() as conn:
             await conn.execute(
@@ -84,9 +69,6 @@ async def register_chat(chat_id: int):
         logging.error(f"❌ Error registering chat: {e}")
 
 async def get_registered_chats() -> list[int]:
-    """
-    Возвращает все chat_id из таблицы chats.
-    """
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch("SELECT chat_id FROM chats")
@@ -96,9 +78,6 @@ async def get_registered_chats() -> list[int]:
         return []
 
 async def get_chat_ids_for_summary(since=None) -> list[int]:
-    """
-    Возвращает список chat_id из messages с фильтром по дате.
-    """
     try:
         async with pool.acquire() as conn:
             if since:
@@ -114,11 +93,8 @@ async def get_chat_ids_for_summary(since=None) -> list[int]:
         return []
 
 async def get_messages_for_summary(chat_id: int, since) -> list[dict]:
-    """
-    Возвращает сообщения за период по chat_id.
-    """
     try:
-        if since.tzinfo is None:
+        if since.tzinfo is None or since.tzinfo.utcoffset(since) is None:
             since = since.replace(tzinfo=timezone.utc)
 
         async with pool.acquire() as conn:
@@ -140,9 +116,6 @@ async def get_messages_for_summary(chat_id: int, since) -> list[dict]:
         return []
 
 async def get_setting(key: str) -> str | None:
-    """
-    Возвращает значение настройки по ключу.
-    """
     try:
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT value FROM settings WHERE key = $1", key)
@@ -152,9 +125,6 @@ async def get_setting(key: str) -> str | None:
         return None
 
 async def set_setting(key: str, value: str):
-    """
-    Устанавливает или обновляет значение настройки.
-    """
     try:
         async with pool.acquire() as conn:
             await conn.execute(
