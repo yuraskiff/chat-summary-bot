@@ -101,7 +101,7 @@ async def cmd_summary(message: Message):
 async def send_summary(bot: Bot, chat_id: int):
     """Собирает за сутки, спрашивает модель, шлёт сводку."""
     now = datetime.now(timezone.utc)
-    since = now - timedelta(days=1)
+    since = (now - timedelta(days=1)).replace(tzinfo=timezone.utc)
 
     msgs = await get_messages_for_summary(chat_id, since)
     print(f"📥 Получено сообщений: {len(msgs)} для чата {chat_id}")
