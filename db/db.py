@@ -51,10 +51,8 @@ async def close_pool():
         return
 
 async def save_message(chat_id: int, username: str, text: str, timestamp):
-    """
-    Сохраняет сообщение в таблицу messages.
-    """
     try:
+        # Приводим timestamp к UTC, если он "наивный"
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
 
@@ -62,10 +60,11 @@ async def save_message(chat_id: int, username: str, text: str, timestamp):
             await conn.execute(
                 """
                 INSERT INTO messages(chat_id, username, text, timestamp)
-                VALUES($1, $2, $3, $4::timestamptz)
+                VALUES($1, $2, $3, $4)
                 """,
-                chat_id, username, text, timestamp.isoformat()
+                chat_id, username, text, timestamp  # <-- передаём как datetime
             )
+
     except Exception as e:
         logging.error(f"❌ Error saving message: {e}")
 
