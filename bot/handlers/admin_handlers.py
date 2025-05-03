@@ -9,7 +9,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 
 from db.db import (
-    get_chat_ids_for_summary,
+    get_registered_chats,
     get_messages_for_summary,
     get_setting,
     set_setting
@@ -23,7 +23,7 @@ router = Router()
 async def cmd_summary(message: Message):
     """
     /summary — моментальная сводка по текущему чату.
-    Работает у всех пользователей.
+    Работает для всех пользователей.
     """
     await send_summary(message.bot, message.chat.id)
 
@@ -31,10 +31,11 @@ async def cmd_summary(message: Message):
 async def cmd_set_prompt(message: Message):
     """
     /set_prompt <текст> — меняет шаблон сводки.
-    Только вы (по своему user_id) можете вызывать эту команду.
+    Доступно только администратору (по user_id).
     """
     if message.from_user.id != ADMIN_CHAT_ID:
         return
+
     new_prompt = message.get_args().strip()
     if not new_prompt:
         return await message.reply("❗️ Укажите новый шаблон после команды.")
@@ -44,13 +45,13 @@ async def cmd_set_prompt(message: Message):
 @router.message(Command("chats"))
 async def cmd_chats(message: Message):
     """
-    /chats — список chat_id, где есть сохранённые сообщения.
-    Команда только для вас.
+    /chats — список всех зарегистрированных чатов.
+    Доступно только администратору.
     """
     if message.from_user.id != ADMIN_CHAT_ID:
         return
 
-    ids = [cid for cid in await get_chat_ids_for_summary(None) if cid is not None]
+    ids = await get_registered_chats()
     if not ids:
         return await message.reply("Нет активных чатов.")
 
@@ -68,8 +69,8 @@ async def cmd_chats(message: Message):
 @router.message(Command("pdf"))
 async def cmd_pdf(message: Message):
     """
-    /pdf <chat_id> — PDF-отчёт за последние 24 часа.
-    Только вы.
+    /pdf <chat_id> — генерирует PDF-отчёт за последние 24 часа для указанного чата.
+    Доступно только администратору.
     """
     if message.from_user.id != ADMIN_CHAT_ID:
         return
@@ -106,7 +107,8 @@ async def cmd_pdf(message: Message):
 
 async def send_summary(bot: Bot, chat_id: int):
     """
-    Вспомогательная функция: делает сводку за 24 часа и отправляет её.
+    Вспомогательная функция: собирает сообщения за последние 24 часа,
+    запрашивает у модели сводку и отправляет её в чат.
     """
     since = datetime.utcnow() - timedelta(days=1)
     msgs = await get_messages_for_summary(chat_id, since)
@@ -121,17 +123,22 @@ async def send_summary(bot: Bot, chat_id: int):
 
 def setup_scheduler(dp):
     """
-    Инициализация планировщика для ежедневных рассылок.
+    Инициализация и запуск планировщика автосводок.
     """
     scheduler = AsyncIOScheduler(timezone="Europe/Tallinn")
     scheduler.add_job(
         lambda: dp.loop.create_task(send_all_summaries(dp.bot)),
-        trigger="cron", hour=23, minute=59
+        trigger="cron",
+        hour=23,
+        minute=59
     )
     scheduler.start()
     dp['scheduler'] = scheduler
 
 async def send_all_summaries(bot: Bot):
+    """
+    Отправляет всем зарегистрированным чатам суточную сводку.
+    """
     since = datetime.utcnow() - timedelta(days=1)
-    for cid in await get_chat_ids_for_summary(since):
+    for cid in await get_registered_chats():
         await send_summary(bot, cid)
