@@ -13,22 +13,32 @@ async def main():
     bot = Bot(BOT_TOKEN, parse_mode="HTML")
     dp = Dispatcher()
 
+    # Инициализация БД
     await init_pool()
 
+    # Роутеры и middleware
     dp.include_router(user_router)
     dp.include_router(admin_router)
     dp.message.middleware(AuthMiddleware())
 
+    # Запуск фоновых сводок
     setup_scheduler(dp)
 
+    # Сбрасываем webhook (если он был) и очищаем очередь апдейтов
+    await bot.delete_webhook(drop_pending_updates=True)
+    logging.info("Webhook deleted and pending updates dropped.")
+
     try:
-        logging.info("Bot is starting...")
+        logging.info("Bot is starting polling...")
         await dp.start_polling(bot)
     finally:
+        # Останов scheduler
         sched = dp.get('scheduler')
         if sched:
             sched.shutdown()
+        # Закрытие БД
         await close_pool()
+        # Закрытие HTTP-сессии бота
         session = await bot.get_session()
         await session.close()
         logging.info("Bot stopped successfully.")
