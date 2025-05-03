@@ -102,10 +102,8 @@ from datetime import datetime, timedelta, timezone
 
 async def send_summary(bot: Bot, chat_id: int):
     """Собирает за сутки, спрашивает модель, шлёт сводку."""
+    # 🕒 Получаем aware datetime с UTC
     since = datetime.now() - timedelta(days=1)
-    since = since.replace(tzinfo=timezone.utc)
-
-    # Подстраховка — убеждаемся, что timezone-aware
     if since.tzinfo is None:
         since = since.replace(tzinfo=timezone.utc)
 
