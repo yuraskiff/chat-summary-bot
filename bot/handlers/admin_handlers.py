@@ -19,11 +19,6 @@ from config.config import ADMIN_CHAT_ID
 
 router = Router()
 
-@router.message(lambda m: m.text is not None and m.text.lower().startswith("/summary"))
-async def cmd_summary(message: Message):
-    """Моментальная сводка по текущему чату — ловим и с упоминанием, и без."""
-    await send_summary(message.bot, message.chat.id)
-
 @router.message(Command("set_prompt"))
 async def cmd_set_prompt(message: Message):
     """Меняет шаблон сводки — только для администратора."""
@@ -98,6 +93,7 @@ async def cmd_pdf(message: Message):
     buf.seek(0)
     await message.reply_document(buf, filename=f"history_{cid}.pdf")
 
+
 async def send_summary(bot: Bot, chat_id: int):
     """Вспомогательная: собирает за сутки, спрашивает модель, шлёт сводку."""
     since = datetime.now(timezone.utc) - timedelta(days=1)
@@ -115,6 +111,7 @@ async def send_summary(bot: Bot, chat_id: int):
 
     await bot.send_message(chat_id, f"📝 Сводка за сутки:\n\n{summary}")
 
+
 def setup_scheduler(dp):
     """Планировщик автосводок на 23:59 Europe/Tallinn."""
     scheduler = AsyncIOScheduler(timezone="Europe/Tallinn")
@@ -126,6 +123,7 @@ def setup_scheduler(dp):
     )
     scheduler.start()
     dp['scheduler'] = scheduler
+
 
 async def send_all_summaries(bot: Bot):
     """Ежедневная рассылка всем зарегистрированным чатам."""
