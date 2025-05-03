@@ -13,48 +13,61 @@ from config.config import BOT_TOKEN
 from db.db import init_pool, close_pool
 
 async def main():
-    # Логи
+    # Настройка логирования
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s"
     )
+    # Уменьшаем подробность логов aiohttp/aiogram
     logging.getLogger("aiogram.client.session").setLevel(logging.ERROR)
 
-    # Бот и диспетчер
+    # Создаём экземпляр бота и диспетчера
     bot = Bot(BOT_TOKEN, parse_mode="HTML")
     dp  = Dispatcher()
 
-    # Инициализация БД
-    await init_pool()
+    # Инициализация пула БД с логированием
+    try:
+        await init_pool()
+        logging.info("✅ Пул БД успешно инициализирован")
+    except Exception as e:
+        logging.error("❌ Не удалось инициализировать БД: %s", e)
+        return  # без БД бот дальше не стартует
 
-    # Регистрируем middleware (сейчас он лишь блокирует админ-команды от чужих)
+    # Регистрируем middleware (блокировка админ-команд для чужих пользователей)
     dp.message.middleware(AuthMiddleware())
 
-    # Подключаем роутеры
+    # Подключаем все роутеры
     dp.include_router(user_router)
     dp.include_router(chat_router)
     dp.include_router(admin_router)
 
-    # Планировщик автосводок
+    # Настраиваем планировщик автосводок
     setup_scheduler(dp)
 
-    # Сбрасываем webhook и пропускаем все старые апдейты
+    # Сбрасываем вебхук и убираем старые апдейты
     await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("Webhook deleted and pending updates dropped.")
+    logging.info("Webhook удалён, старые обновления сброшены.")
 
     try:
-        logging.info("Bot is starting polling...")
+        logging.info("🚀 Бот запускается в режиме polling...")
         await dp.start_polling(bot, skip_updates=True)
     finally:
-        # Завершаем всё аккуратно
+        # При остановке корректно выключаем планировщик, пул и сессию бота
         sched = dp.get("scheduler")
         if sched:
             sched.shutdown()
 
         await close_pool()
-        session = await bot.get_session()
-        await session.close()
-        logging.info("Bot stopped successfully.")
+
+        # В aiogram 3.x правильнее закрывать session так:
+        try:
+            await bot.session.close()
+        except AttributeError:
+            # Для старых версий aiogram:
+            session = await bot.get_session()
+            await session.close()
+
+        logging.info("🛑 Бот остановлен успешно.")
 
 if __name__ == "__main__":
     asyncio.run(main())
