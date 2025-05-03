@@ -1,6 +1,6 @@
 import asyncpg
 import logging
-from datetime import timezone
+from datetime import datetime, timezone
 from config.config import DATABASE_URL
 
 pool: asyncpg.Pool | None = None
@@ -81,6 +81,8 @@ async def get_chat_ids_for_summary(since=None) -> list[int]:
     try:
         async with pool.acquire() as conn:
             if since:
+                if since.tzinfo is None:
+                    since = since.replace(tzinfo=timezone.utc)
                 rows = await conn.fetch(
                     "SELECT DISTINCT chat_id FROM messages WHERE timestamp >= $1",
                     since
@@ -94,7 +96,8 @@ async def get_chat_ids_for_summary(since=None) -> list[int]:
 
 async def get_messages_for_summary(chat_id: int, since) -> list[dict]:
     try:
-        since = since.astimezone(timezone.utc)  # <-- исправленный отступ
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(
