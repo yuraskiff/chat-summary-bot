@@ -64,7 +64,7 @@ async def cmd_pdf(message: Message):
         return
 
     cid = int(parts[0])
-    since = (datetime.now(timezone.utc) - timedelta(days=1)).astimezone(timezone.utc)
+    since = datetime.now(timezone.utc) - timedelta(days=1)
     msgs = await get_messages_for_summary(cid, since)
     if not msgs:
         await message.reply("Нет сообщений за последние 24 часа.")
@@ -100,7 +100,7 @@ async def cmd_summary(message: Message):
 
 async def send_summary(bot: Bot, chat_id: int):
     """Собирает за сутки, спрашивает модель, шлёт сводку."""
-    since = (datetime.now(timezone.utc) - timedelta(days=1)).astimezone(timezone.utc)
+    since = datetime.now(timezone.utc) - timedelta(days=1)
 
     msgs = await get_messages_for_summary(chat_id, since)
     print(f"📥 Получено сообщений: {len(msgs)} для чата {chat_id}")
@@ -139,6 +139,6 @@ def setup_scheduler(dp):
     dp['scheduler'] = scheduler
 
 async def send_all_summaries(bot: Bot):
-    since = (datetime.now(timezone.utc) - timedelta(days=1)).astimezone(timezone.utc)
+    since = datetime.now(timezone.utc) - timedelta(days=1)
     for cid in await get_registered_chats():
         await send_summary(bot, cid)
