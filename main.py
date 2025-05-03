@@ -1,73 +1,74 @@
-import asyncio
+import os
 import logging
+import asyncio
 
 from aiogram import Bot, Dispatcher
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
+from aiohttp import web
 
-# Импортируем все три роутера
 from bot.handlers.user_handlers import router as user_router
 from bot.handlers.chat_handlers import router as chat_router
 from bot.handlers.admin_handlers import router as admin_router, setup_scheduler
 from bot.middleware.auth_middleware import AuthMiddleware
-
-from config.config import BOT_TOKEN
+from config.config import BOT_TOKEN, WEBHOOK_URL
 from db.db import init_pool, close_pool
 
-async def main():
-    # Настройка логирования
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s"
-    )
-    # Уменьшаем подробность логов aiohttp/aiogram
-    logging.getLogger("aiogram.client.session").setLevel(logging.ERROR)
+# --- Настройка логирования ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logging.getLogger("aiogram.client.session").setLevel(logging.ERROR)
 
-    # Создаём экземпляр бота и диспетчера
-    bot = Bot(BOT_TOKEN, parse_mode="HTML")
-    dp  = Dispatcher()
+# --- Создаём бота и диспетчер ---
+bot = Bot(BOT_TOKEN, parse_mode="HTML")
+dp  = Dispatcher()
 
-    # Инициализация пула БД с логированием
-    try:
-        await init_pool()
-        logging.info("✅ Пул БД успешно инициализирован")
-    except Exception as e:
-        logging.error("❌ Не удалось инициализировать БД: %s", e)
-        return  # без БД бот дальше не стартует
+# Регистрируем middleware и роутеры
+dp.message.middleware(AuthMiddleware())
+dp.include_router(user_router)
+dp.include_router(chat_router)
+dp.include_router(admin_router)
 
-    # Регистрируем middleware (блокировка админ-команд для чужих пользователей)
-    dp.message.middleware(AuthMiddleware())
+# --- aiohttp-приложение для webhook ---
+app = web.Application()
 
-    # Подключаем все роутеры
-    dp.include_router(user_router)
-    dp.include_router(chat_router)
-    dp.include_router(admin_router)
+# Точка входа для Telegram: /webhook/{BOT_TOKEN}
+SimpleRequestHandler(dispatcher=dp, bot=bot).register(
+    app, path=f"/webhook/{BOT_TOKEN}"
+)
 
-    # Настраиваем планировщик автосводок
+# --- Функции старта и остановки ---
+async def on_startup(app: web.Application):
+    # Инициализируем пул БД и планировщик автосводок
+    await init_pool()
     setup_scheduler(dp)
+    # Устанавливаем webhook в Telegram
+    await bot.set_webhook(WEBHOOK_URL)
+    logging.info("🚀 Webhook установлен: %s", WEBHOOK_URL)
 
-    # Сбрасываем вебхук и убираем старые апдейты
-    await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("Webhook удалён, старые обновления сброшены.")
-
+async def on_shutdown(app: web.Application):
+    # Удаляем webhook
+    await bot.delete_webhook()
+    # Останавливаем планировщик, пул и закрываем сессию бота
+    sched = dp.get("scheduler")
+    if sched:
+        sched.shutdown()
+    await close_pool()
     try:
-        logging.info("🚀 Бот запускается в режиме polling...")
-        await dp.start_polling(bot, skip_updates=True)
-    finally:
-        # При остановке корректно выключаем планировщик, пул и сессию бота
-        sched = dp.get("scheduler")
-        if sched:
-            sched.shutdown()
+        await bot.session.close()
+    except AttributeError:
+        session = await bot.get_session()
+        await session.close()
+    logging.info("🛑 Шатдаун завершён")
 
-        await close_pool()
+# Привязываем стартап/шатдаун
+app.on_startup.append(on_startup)
+app.on_cleanup.append(on_shutdown)
 
-        # В aiogram 3.x правильнее закрывать session так:
-        try:
-            await bot.session.close()
-        except AttributeError:
-            # Для старых версий aiogram:
-            session = await bot.get_session()
-            await session.close()
-
-        logging.info("🛑 Бот остановлен успешно.")
-
+# --- Запуск aiohttp-сервера ---
 if __name__ == "__main__":
-    asyncio.run(main())
+    port = int(os.getenv("PORT", 8000))
+    host = "0.0.0.0"
+    logging.info("Запуск aiohttp на %s:%d …", host, port)
+    web.run_app(app, host=host, port=port)
