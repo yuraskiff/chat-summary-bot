@@ -13,9 +13,11 @@ from bot.middleware.auth_middleware import AuthMiddleware
 from config.config import BOT_TOKEN, WEBHOOK_URL, PORT
 from db.db import init_pool, close_pool
 
+# --- Логи ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("aiogram.client.session").setLevel(logging.ERROR)
 
+# --- Инициализация бота и диспетчера ---
 bot = Bot(BOT_TOKEN, parse_mode="HTML")
 dp = Dispatcher()
 dp.message.middleware(AuthMiddleware())
@@ -23,9 +25,11 @@ dp.include_router(user_router)
 dp.include_router(chat_router)
 dp.include_router(admin_router)
 
+# --- Настройка aiohttp + маршрут webhook ---
 app = web.Application()
 SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=f"/webhook/{BOT_TOKEN}")
 
+# --- Стартап и шатдаун ---
 async def on_startup(app: web.Application):
     await init_pool()
     setup_scheduler(dp)
@@ -35,7 +39,8 @@ async def on_startup(app: web.Application):
     logging.info("🚀 Webhook установлен: %s", WEBHOOK_URL)
 
     info = await bot.get_webhook_info()
-    logging.info("🔍 WebhookInfo: %s", info.to_python())
+    # Логируем все поля WebhookInfo
+    logging.info("🔍 WebhookInfo: %s", info.dict())
 
 async def on_shutdown(app: web.Application):
     await bot.delete_webhook()
@@ -53,6 +58,7 @@ async def on_shutdown(app: web.Application):
 app.on_startup.append(on_startup)
 app.on_cleanup.append(on_shutdown)
 
+# --- Точка входа ---
 if __name__ == "__main__":
     host = "0.0.0.0"
     logging.info("Запуск aiohttp на %s:%d …", host, PORT)
