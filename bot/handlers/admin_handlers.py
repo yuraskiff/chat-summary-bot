@@ -21,17 +21,12 @@ router = Router()
 
 @router.message(lambda m: m.text is not None and m.text.lower().startswith("/summary"))
 async def cmd_summary(message: Message):
-    """
-    Поймает и /summary, и /summary@BotUsername (любые регистры и упоминания).
-    """
+    """Моментальная сводка по текущему чату — ловим и с упоминанием, и без."""
     await send_summary(message.bot, message.chat.id)
 
 @router.message(Command("set_prompt"))
 async def cmd_set_prompt(message: Message):
-    """
-    /set_prompt <текст> — меняет шаблон сводки.
-    Только администратор (по user_id) может вызвать.
-    """
+    """Меняет шаблон сводки — только для администратора."""
     if message.from_user.id != ADMIN_CHAT_ID:
         return
 
@@ -45,10 +40,7 @@ async def cmd_set_prompt(message: Message):
 
 @router.message(Command("chats"))
 async def cmd_chats(message: Message):
-    """
-    /chats — список всех зарегистрированных чатов.
-    Только администратор.
-    """
+    """Показывает все зарегистрированные чаты — только для администратора."""
     if message.from_user.id != ADMIN_CHAT_ID:
         return
 
@@ -70,10 +62,7 @@ async def cmd_chats(message: Message):
 
 @router.message(Command("pdf"))
 async def cmd_pdf(message: Message):
-    """
-    /pdf <chat_id> — генерирует PDF-отчёт за последние 24 часа.
-    Только администратор.
-    """
+    """Генерирует PDF-отчёт за последние 24 часа — только для администратора."""
     if message.from_user.id != ADMIN_CHAT_ID:
         return
 
@@ -91,29 +80,26 @@ async def cmd_pdf(message: Message):
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
-    text_obj = c.beginText(40, 750)
-    text_obj.setFont("Helvetica", 10)
+    text = c.beginText(40, 750)
+    text.setFont("Helvetica", 10)
 
     for m in msgs:
         ts = m["timestamp"].astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
         line = f"{ts} | {m['username']}: {m['text']}"
-        text_obj.textLine(line[:1000])
-        if text_obj.getY() < 40:
-            c.drawText(text_obj)
+        text.textLine(line[:1000])
+        if text.getY() < 40:
+            c.drawText(text)
             c.showPage()
-            text_obj = c.beginText(40, 750)
-            text_obj.setFont("Helvetica", 10)
+            text = c.beginText(40, 750)
+            text.setFont("Helvetica", 10)
 
-    c.drawText(text_obj)
+    c.drawText(text)
     c.save()
     buf.seek(0)
     await message.reply_document(buf, filename=f"history_{cid}.pdf")
 
 async def send_summary(bot: Bot, chat_id: int):
-    """
-    Вспомогательная функция: собирает сообщения за последние 24 часа,
-    запрашивает у модели сводку и отправляет её в чат.
-    """
+    """Вспомогательная: собирает за сутки, спрашивает модель, шлёт сводку."""
     since = datetime.now(timezone.utc) - timedelta(days=1)
     msgs = await get_messages_for_summary(chat_id, since)
     if not msgs:
@@ -130,9 +116,7 @@ async def send_summary(bot: Bot, chat_id: int):
     await bot.send_message(chat_id, f"📝 Сводка за сутки:\n\n{summary}")
 
 def setup_scheduler(dp):
-    """
-    Инициализация планировщика автосводок.
-    """
+    """Планировщик автосводок на 23:59 Europe/Tallinn."""
     scheduler = AsyncIOScheduler(timezone="Europe/Tallinn")
     scheduler.add_job(
         lambda: dp.loop.create_task(send_all_summaries(dp.bot)),
@@ -144,9 +128,7 @@ def setup_scheduler(dp):
     dp['scheduler'] = scheduler
 
 async def send_all_summaries(bot: Bot):
-    """
-    Отправляет всем зарегистрированным чатам суточную сводку.
-    """
+    """Ежедневная рассылка всем зарегистрированным чатам."""
     since = datetime.now(timezone.utc) - timedelta(days=1)
     for cid in await get_registered_chats():
         await send_summary(bot, cid)
