@@ -98,17 +98,11 @@ async def cmd_summary(message: Message):
     await send_summary(message.bot, chat_id)
 
 
-from datetime import datetime, timedelta, timezone
-
 async def send_summary(bot: Bot, chat_id: int):
     """Собирает за сутки, спрашивает модель, шлёт сводку."""
-    # 🕒 Получаем aware datetime с UTC
-    since = datetime.now() - timedelta(days=1)
-    if since.tzinfo is None:
-        since = since.replace(tzinfo=timezone.utc)
+    since = datetime.now(timezone.utc) - timedelta(days=1)
 
     msgs = await get_messages_for_summary(chat_id, since)
-
     print(f"📥 Получено сообщений: {len(msgs)} для чата {chat_id}")
 
     if not msgs:
@@ -143,7 +137,6 @@ def setup_scheduler(dp):
     )
     scheduler.start()
     dp['scheduler'] = scheduler
-
 
 async def send_all_summaries(bot: Bot):
     since = datetime.now(timezone.utc) - timedelta(days=1)
