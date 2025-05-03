@@ -4,7 +4,7 @@ import asyncio
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher
-from aiogram.dispatcher.webhook import SimpleRequestHandler
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from aiogram import types
 from aiohttp import web
 
