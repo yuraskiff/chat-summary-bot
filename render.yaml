@@ -4,7 +4,7 @@ services:
     env: python
     plan: free
     branch: main
-    repo: https://github.com/your-username/your-repo-name
+    repo: https://github.com/yuraskiff/chat-summary-bot
     startCommand: ./start.sh
     envVars:
       - key: BOT_TOKEN
