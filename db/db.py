@@ -56,13 +56,15 @@ async def save_message(chat_id: int, username: str, text: str, timestamp):
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
 
+        logging.warning(f"[DEBUG] Saving message with timestamp: {timestamp} (tzinfo={timestamp.tzinfo})")
+
         async with pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO messages(chat_id, username, text, timestamp)
                 VALUES($1, $2, $3, $4)
                 """,
-                chat_id, username, text, timestamp  # <-- передаём как datetime
+                chat_id, username, text, timestamp
             )
 
     except Exception as e:
