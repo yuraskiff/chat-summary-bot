@@ -6,23 +6,30 @@ pool: asyncpg.Pool | None = None
 
 async def init_pool():
     global pool
-    pool = await asyncpg.create_pool(DATABASE_URL)
-    logging.info("Database pool initialized successfully.")
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                chat_id BIGINT NOT NULL,
-                username TEXT NOT NULL,
-                text TEXT NOT NULL,
-                timestamp TIMESTAMPTZ NOT NULL
-            );
-        """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-        """)
+    try:
+        pool = await asyncpg.create_pool(DATABASE_URL)
+        logging.info("Database pool initialized successfully.")
+        # Создаём таблицы, если их нет
+        async with pool.acquire() as conn:
+            # Таблица сообщений
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    chat_id BIGINT NOT NULL,
+                    username TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    timestamp TIMESTAMPTZ NOT NULL
+                );
+            """)
+            # Таблица настроек
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+            """)
+    except Exception as e:
+        logging.error(f"Database connection failed: {e}")
+        raise
 
 async def close_pool():
     global pool
@@ -63,10 +70,13 @@ async def get_messages_for_summary(chat_id: int, since) -> list[dict]:
                 FROM messages
                 WHERE chat_id = $1 AND timestamp >= $2
                 ORDER BY timestamp ASC
-                """",
+                """,
                 chat_id, since
             )
-        return [{"username": r["username"], "text": r["text"], "timestamp": r["timestamp"]} for r in rows]
+        return [
+            {"username": r["username"], "text": r["text"], "timestamp": r["timestamp"]}
+            for r in rows
+        ]
     except Exception as e:
         logging.error(f"Error fetching messages: {e}")
         return []
@@ -74,10 +84,10 @@ async def get_messages_for_summary(chat_id: int, since) -> list[dict]:
 async def get_setting(key: str) -> str | None:
     try:
         async with pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT value FROM settings WHERE key=$1", key)
+            row = await conn.fetchrow("SELECT value FROM settings WHERE key = $1", key)
         return row["value"] if row else None
     except Exception as e:
-        logging.error(f"Error getting setting {key}: {e}")
+        logging.error(f"Error getting setting '{key}': {e}")
         return None
 
 async def set_setting(key: str, value: str):
@@ -88,8 +98,8 @@ async def set_setting(key: str, value: str):
                 INSERT INTO settings(key, value)
                 VALUES($1, $2)
                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-                """",
+                """,
                 key, value
             )
     except Exception as e:
-        logging.error(f"Error setting {key}: {e}")
+        logging.error(f"Error setting '{key}': {e}")
