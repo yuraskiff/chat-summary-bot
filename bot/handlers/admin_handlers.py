@@ -1,3 +1,4 @@
+import re
 import io
 from datetime import datetime, timedelta, timezone
 
@@ -19,10 +20,10 @@ from config.config import ADMIN_CHAT_ID
 
 router = Router()
 
-@router.message(Command("summary"))
+@router.message(lambda m: m.text is not None and re.match(r"^/summary(@\w+)?($|\s)", m.text))
 async def cmd_summary(message: Message):
     """
-    /summary — моментальная сводка по текущему чату.
+    /summary или /summary@BotUsername — моментальная сводка по текущему чату.
     Работает для всех пользователей.
     """
     await send_summary(message.bot, message.chat.id)
@@ -31,14 +32,16 @@ async def cmd_summary(message: Message):
 async def cmd_set_prompt(message: Message):
     """
     /set_prompt <текст> — меняет шаблон сводки.
-    Доступно только администратору.
+    Только администратор (по user_id) может вызвать.
     """
     if message.from_user.id != ADMIN_CHAT_ID:
         return
 
     new_prompt = message.get_args().strip()
     if not new_prompt:
-        return await message.reply("❗️ Укажите новый шаблон после команды.")
+        await message.reply("❗️ Укажите новый шаблон после команды.")
+        return
+
     await set_setting("summary_prompt", new_prompt)
     await message.reply("✅ Шаблон сводки обновлён.")
 
@@ -46,14 +49,15 @@ async def cmd_set_prompt(message: Message):
 async def cmd_chats(message: Message):
     """
     /chats — список всех зарегистрированных чатов.
-    Доступно только администратору.
+    Только администратор.
     """
     if message.from_user.id != ADMIN_CHAT_ID:
         return
 
     ids = await get_registered_chats()
     if not ids:
-        return await message.reply("Нет активных чатов.")
+        await message.reply("Нет активных чатов.")
+        return
 
     lines = []
     for cid in ids:
@@ -69,21 +73,23 @@ async def cmd_chats(message: Message):
 @router.message(Command("pdf"))
 async def cmd_pdf(message: Message):
     """
-    /pdf <chat_id> — генерирует PDF-отчёт за последние 24 часа для указанного чата.
-    Доступно только администратору.
+    /pdf <chat_id> — генерирует PDF-отчёт за последние 24 часа.
+    Только администратор.
     """
     if message.from_user.id != ADMIN_CHAT_ID:
         return
 
     parts = message.get_args().split()
     if not parts or not parts[0].isdigit():
-        return await message.reply("❗️ Укажите chat_id: `/pdf 123456789`")
+        await message.reply("❗️ Укажите chat_id: `/pdf 123456789`")
+        return
 
     cid = int(parts[0])
     since = datetime.now(timezone.utc) - timedelta(days=1)
     msgs = await get_messages_for_summary(cid, since)
     if not msgs:
-        return await message.reply("Нет сообщений за последние 24 часа.")
+        await message.reply("Нет сообщений за последние 24 часа.")
+        return
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
@@ -113,12 +119,16 @@ async def send_summary(bot: Bot, chat_id: int):
     since = datetime.now(timezone.utc) - timedelta(days=1)
     msgs = await get_messages_for_summary(chat_id, since)
     if not msgs:
-        return await bot.send_message(chat_id, "Нет сообщений за последние 24 часа.")
+        await bot.send_message(chat_id, "Нет сообщений за последние 24 часа.")
+        return
+
     blocks = [f"{m['username']}: {m['text']}" for m in msgs]
     prompt = await get_setting("summary_prompt")
     summary = await summarize_chat(blocks, prompt)
     if not summary:
-        return await bot.send_message(chat_id, "Не удалось получить сводку.")
+        await bot.send_message(chat_id, "Не удалось получить сводку.")
+        return
+
     await bot.send_message(chat_id, f"📝 Сводка за сутки:\n\n{summary}")
 
 def setup_scheduler(dp):
