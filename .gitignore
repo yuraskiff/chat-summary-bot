@@ -1,4 +1,9 @@
+# .gitignore
 __pycache__/
-*.pyc
+*.py[cod]
 .env
+.env.*
+*.log
 *.sqlite3
+.DS_Store
+# и т.д.
