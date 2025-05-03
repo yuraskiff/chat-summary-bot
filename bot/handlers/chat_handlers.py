@@ -15,5 +15,4 @@ async def on_my_chat_member(update: ChatMemberUpdated):
     is_in = new.status in ("member", "administrator")
     if was_out and is_in:
         # Пример добавления текущего времени (если тебе потребуется это в register_chat)
-        current_time = datetime.now(timezone.utc)
-        await register_chat(update.chat.id, registered_at=current_time)
+        await register_chat(update.chat.id)
