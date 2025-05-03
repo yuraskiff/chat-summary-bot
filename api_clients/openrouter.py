@@ -1,4 +1,3 @@
-
 import httpx
 import logging
 import textwrap
@@ -10,7 +9,7 @@ TIMEOUT = httpx.Timeout(10.0, read=60.0)
 
 HEADERS = {
     "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-    "HTTP-Referer": "https://yourdomain.com",
+    "HTTP-Referer": "https://chat-summary-bot.onrender.com",
     "X-Title": "chat-summary-bot",
     "Content-Type": "application/json",
 }
