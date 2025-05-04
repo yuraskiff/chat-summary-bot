@@ -49,7 +49,7 @@ if ADMIN_CHAT_ID is None:
     logging.warning("ADMIN_CHAT_ID не задан или некорректен в config.py. Админ-команды будут недоступны.")
 elif not isinstance(ADMIN_CHAT_ID, int):
      logging.error(f"ADMIN_CHAT_ID из config.py не является числом (тип: {type(ADMIN_CHAT_ID)}). Админ-команды не будут работать.")
-     # Устанавливаем в None, чтобы фильтр гарантированно не пропускал
+     # Устанавливаем в None, чтобы фильтр точно не пропускал
      ADMIN_CHAT_ID = None # Это изменит импортированное значение только в этом модуле
 else:
      logging.info(f"ADMIN_CHAT_ID для проверки прав администратора: {ADMIN_CHAT_ID}")
@@ -77,14 +77,13 @@ async def before_admin_cmd_log(message: Message) -> bool: # Указываем �
     # ВАЖНО: Возвращаем False, чтобы aiogram попробовал следующий хэндлер в цепочке
     return False
 
-# --- Основные хэндлеры админских команд с фильтром ---
+# --- Основные хэндлеры админских команд ---
 
+# cmd_set_prompt остается с фильтром
 @router.message(Command("set_prompt"), ADMIN_FILTER)
 async def cmd_set_prompt(message: Message):
     """Устанавливает системный промпт для OpenAI (только админ)."""
-    # Лог входа в хэндлер после успешной проверки фильтром
     logging.info(f"Пользователь {message.from_user.id} (АДМИН={ADMIN_CHAT_ID}) выполняет /set_prompt")
-    # Извлекаем аргументы команды
     new_prompt = message.text.split(maxsplit=1)[1].strip() if ' ' in message.text else ""
     if not new_prompt:
         await message.reply("❗️ Укажите новый шаблон после команды.\nПример: `/set_prompt Сделай краткую сводку:`")
@@ -96,12 +95,22 @@ async def cmd_set_prompt(message: Message):
         logging.exception(f"Ошибка при сохранении настройки summary_prompt: {e}")
         await message.reply("❌ Не удалось сохранить настройку.")
 
-
-@router.message(Command("chats"), ADMIN_FILTER)
+# ----> ИЗМЕНЕННЫЙ CMD_CHATS: БЕЗ ФИЛЬТРА, С ВНУТРЕННЕЙ ПРОВЕРКОЙ <----
+@router.message(Command("chats")) # <--- УБРАН ADMIN_FILTER
 async def cmd_chats(message: Message):
-    """Показывает список активных чатов (только админ)."""
-    # Лог входа в хэндлер после успешной проверки фильтром
-    logging.info(f"Пользователь {message.from_user.id} (АДМИН={ADMIN_CHAT_ID}) выполняет /chats")
+    """Показывает список активных чатов (проверка админа внутри)."""
+    # Логгируем вызов хэндлера ДО проверки прав
+    logging.info(f"Хэндлер /chats вызван пользователем {message.from_user.id}.")
+
+    # ----> ЯВНАЯ ПРОВЕРКА ПРАВ АДМИНИСТРАТОРА <----
+    if not isinstance(ADMIN_CHAT_ID, int) or message.from_user.id != ADMIN_CHAT_ID:
+        logging.warning(f"Доступ к /chats запрещен для user {message.from_user.id}. ADMIN_CHAT_ID={ADMIN_CHAT_ID}")
+        # Молча игнорируем или можно отправить сообщение
+        # await message.reply("У вас нет прав для выполнения этой команды.")
+        return # Завершаем выполнение хэндлера
+
+    # Если проверка пройдена:
+    logging.info(f"Пользователь {message.from_user.id} (АДМИН={ADMIN_CHAT_ID}) прошел проверку и выполняет /chats")
     try:
         logging.info("Запрашиваю список зарегистрированных чатов из БД...")
         chat_ids = await get_registered_chats()
@@ -117,8 +126,7 @@ async def cmd_chats(message: Message):
         for cid in chat_ids:
             try:
                 logging.debug(f"Получение информации для chat_id: {cid}")
-                # Добавляем таймаут к запросу get_chat
-                chat_info = await message.bot.get_chat(chat_id=cid) # request_timeout=10
+                chat_info = await message.bot.get_chat(chat_id=cid)
                 title = chat_info.title or chat_info.full_name or f"ID: {cid}"
                 link_part = ""
                 if chat_info.type in ('group', 'supergroup', 'channel'):
@@ -146,11 +154,10 @@ async def cmd_chats(message: Message):
         logging.exception(f"Критическая ошибка при выполнении команды /chats: {e}")
         await message.reply("❌ Произошла ошибка при получении списка чатов.")
 
-
+# cmd_pdf остается с фильтром
 @router.message(Command("pdf"), ADMIN_FILTER)
 async def cmd_pdf(message: Message):
     """Создает PDF с историей сообщений за последние 24ч (только админ)."""
-    # Лог входа в хэндлер после успешной проверки фильтром
     logging.info(f"Пользователь {message.from_user.id} (АДМИН={ADMIN_CHAT_ID}) выполняет /pdf")
     args = message.text.split()
     if len(args) < 2 or not args[1].lstrip('-').isdigit():
@@ -222,27 +229,23 @@ async def cmd_pdf(message: Message):
         await message.reply("❌ Произошла ошибка при создании PDF.")
 
 
-# --- Функция отправки сводки (используется /summary и планировщиком) ---
-# Она остается без изменений с последней версии (где исправлен logging.success)
+# --- Функция отправки сводки ---
+# (код send_summary без изменений с прошлой версии)
 async def send_summary(bot: Bot, chat_id: int):
-    """Собирает сообщения за 24 часа, генерирует и отправляет сводку."""
     logging.info(f"Начало генерации сводки для чата {chat_id}")
     now_aware = datetime.now(timezone.utc)
     since_aware = now_aware - timedelta(days=1)
-
     logging.info(f"Запрос сообщений для сводки чата {chat_id} с {since_aware}")
     try:
         messages_data = await get_messages_for_summary(chat_id, since=since_aware)
         logging.info(f"📥 Получено сообщений: {len(messages_data)} для чата {chat_id}")
     except Exception as e:
         logging.exception(f"❌ Ошибка при получении сообщений для сводки чата {chat_id}: {e}")
-        return # Просто выходим, не спамим в чат
-
+        return
     MIN_MESSAGES_FOR_SUMMARY = 5
     if not messages_data or len(messages_data) < MIN_MESSAGES_FOR_SUMMARY:
         logging.info(f"Недостаточно сообщений ({len(messages_data)}) для сводки в чате {chat_id}.")
-        return # Не спамим в чат
-
+        return
     message_blocks = []
     for m in messages_data:
         msg_timestamp = m["timestamp"]
@@ -253,14 +256,12 @@ async def send_summary(bot: Bot, chat_id: int):
         text = m.get("text", "") or "[пусто]"
         MAX_MSG_LEN = 1000
         message_blocks.append(f"[{ts}] {sender}: {text[:MAX_MSG_LEN]}")
-
     default_prompt = "Сделай очень краткую сводку (summary) следующих сообщений в чате за последние 24 часа. Выдели основные темы и ключевые моменты. Ответ дай на русском языке."
     try:
         summary_prompt = await get_setting("summary_prompt") or default_prompt
     except Exception as e:
         logging.exception(f"Ошибка при получении настройки summary_prompt: {e}")
         summary_prompt = default_prompt
-
     logging.info(f"⏳ Отправляем {len(message_blocks)} блоков сообщений в OpenAI для чата {chat_id}...")
     try:
         summary_text = await summarize_chat(message_blocks, system_prompt=summary_prompt)
@@ -269,17 +270,14 @@ async def send_summary(bot: Bot, chat_id: int):
         try: await bot.send_message(chat_id, "⚠️ Произошла ошибка при генерации сводки.")
         except Exception: pass
         return
-
     if not summary_text:
         logging.warning(f"OpenAI вернул пустую сводку для чата {chat_id}.")
-        return # Не отправляем ничего, если ответ пуст
-
+        return
     try:
         full_summary_text = f"📝 <b>Сводка за последние 24 часа:</b>\n\n{summary_text}"
         MAX_LEN = 4096
         for i in range(0, len(full_summary_text), MAX_LEN):
             await bot.send_message(chat_id, full_summary_text[i:i + MAX_LEN], parse_mode="HTML")
-
         logging.info(f"✅ Сводка успешно отправлена в чат {chat_id}")
         await set_setting(f"last_summary_ts_{chat_id}", now_aware.isoformat())
     except Exception as e:
@@ -287,18 +285,14 @@ async def send_summary(bot: Bot, chat_id: int):
 
 
 # --- Настройка планировщика ---
+# (код setup_scheduler и trigger_all_summaries без изменений с прошлой версии)
 def setup_scheduler(bot: Bot):
-    """Настраивает и запускает планировщик для ежедневной отправки сводок."""
     scheduler = AsyncIOScheduler(timezone="UTC")
     try:
         scheduler.add_job(
             trigger_all_summaries,
-            trigger="cron",
-            hour=21, minute=0, # 21:00 UTC
-            args=[bot],
-            id="daily_summaries",
-            replace_existing=True,
-            misfire_grace_time=300
+            trigger="cron", hour=21, minute=0,
+            args=[bot], id="daily_summaries", replace_existing=True, misfire_grace_time=300
         )
         scheduler.start()
         next_run = scheduler.get_job('daily_summaries').next_run_time
@@ -306,15 +300,12 @@ def setup_scheduler(bot: Bot):
     except Exception as e:
         logging.exception(f"❌ Не удалось запустить планировщик: {e}")
 
-
 async def trigger_all_summaries(bot: Bot):
-    """Запускает отправку сводок для всех зарегистрированных чатов."""
     logging.info("🚀 Запуск ежедневной рассылки сводок...")
     try:
         registered_chats = await get_registered_chats()
         logging.info(f"Найдено {len(registered_chats)} зарегистрированных чатов для сводки.")
         current_time = datetime.now(timezone.utc)
-
         for chat_id in registered_chats:
             should_send = True
             try:
@@ -330,15 +321,12 @@ async def trigger_all_summaries(bot: Bot):
                 logging.warning(f"Некорректный формат времени последней сводки для чата {chat_id}: {last_summary_ts_str}")
             except Exception as e:
                 logging.exception(f"Ошибка при проверке времени последней сводки для чата {chat_id}: {e}")
-
             if should_send:
                 logging.info(f"Запуск задачи сводки для чата {chat_id}...")
                 try:
-                    # Запускаем последовательно
                     await send_summary(bot, chat_id)
                 except Exception as e:
                     logging.exception(f"❌ Исключение при вызове send_summary для чата {chat_id} в планировщике: {e}")
-
     except Exception as e:
         logging.exception(f"❌ Критическая ошибка при выполнении trigger_all_summaries: {e}")
     finally:
