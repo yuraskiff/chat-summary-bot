@@ -3,7 +3,7 @@ from aiogram.filters import Command
 from datetime import datetime, timezone
 
 from db.db import save_message
-from bot.handlers.admin_handlers import send_summary  # добавлено
+from bot.handlers.admin_handlers import send_summary
 
 router = Router()
 
@@ -36,12 +36,7 @@ async def handle_message(message: types.Message):
     if text_to_save:
         await save_message(
             message.chat.id,
-            message.from_user.full_name,
+            message.from_user.username or message.from_user.full_name,
             text_to_save,
             message.date
-        )age(
-            chat_id=message.chat.id,
-            username=message.from_user.username or message.from_user.full_name,
-            text=text_to_save,
-            timestamp=datetime.now(timezone.utc)  # aware datetime
         )
