@@ -8,8 +8,8 @@ from config.config import OPENROUTER_API_KEY
 
 # --- Константы ---
 # Модель можно вынести в config.py или .env при желании
-MODEL = "openai/gpt-3.5-turbo" # Используем стандартную модель для начала
-# MODEL = "deepseek/deepseek-chat-v3-0324:free" # Если хотите DeepSeek
+# MODEL = "openai/gpt-3.5-turbo" # Используем стандартную модель для начала
+MODEL = "deepseek/deepseek-chat-v3-0324:free" # Если хотите DeepSeek
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 # Таймауты: 10с на соединение, 60с на чтение ответа
 TIMEOUT = httpx.Timeout(10.0, read=60.0)
