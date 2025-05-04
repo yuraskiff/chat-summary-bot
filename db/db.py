@@ -124,23 +124,27 @@ async def _release_connection(conn: asyncpg.Connection):
 
 
 async def save_message(chat_id: int, username: str, text: str, timestamp: datetime):
-    """Сохраняет сообщение, гарантируя, что timestamp сохраняется как aware UTC."""
+    """Сохраняет сообщение, преобразуя timestamp в строку ISO 8601 для передачи в БД."""
     conn: Optional[asyncpg.Connection] = None
     try:
         conn = await _get_connection()
-        # Убеждаемся, что время aware и в UTC перед сохранением
+        # 1. Убеждаемся, что время aware и в UTC
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
         elif timestamp.tzinfo != timezone.utc:
             timestamp = timestamp.astimezone(timezone.utc)
 
-        # Используем кавычки для "timestamp", т.к. это ключевое слово в SQL
+        # 2. Преобразуем aware UTC datetime в строку ISO 8601
+        # PostgreSQL понимает этот формат для TIMESTAMPTZ
+        timestamp_iso = timestamp.isoformat()
+
+        # 3. Передаем строку в запрос
         await conn.execute(
             """
             INSERT INTO messages(chat_id, username, text, "timestamp")
-            VALUES($1, $2, $3, $4)
+            VALUES($1, $2, $3, $4::TIMESTAMPTZ) -- Оставляем каст на всякий случай
             """,
-            chat_id, username, text, timestamp
+            chat_id, username, text, timestamp_iso # Передаем строку timestamp_iso
         )
     except Exception as e:
         # Логируем исключение с traceback
