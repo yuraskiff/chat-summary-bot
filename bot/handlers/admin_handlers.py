@@ -5,8 +5,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-# Убедитесь, что Bot импортирован
-from aiogram import Router, Bot
+# Используем F для Magic Filter и Bot для type hinting
+from aiogram import Router, Bot, F
 from aiogram.types import Message, InputFile
 from aiogram.filters import Command
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -22,19 +22,16 @@ from db.db import (
     get_setting,
     set_setting
 )
+# Убедитесь, что импорт функции из openrouter корректен
 from api_clients.openrouter import summarize_chat
 from config.config import ADMIN_CHAT_ID
 
-# Для type hinting, чтобы избежать циклического импорта с main.py, если он понадобится
-# if TYPE_CHECKING:
-#     from aiogram import Dispatcher
-
 # --- Настройка шрифта для PDF ---
 PDF_FONT = 'Helvetica' # Шрифт по умолчанию
-PDF_FONT_PATH = 'DejaVuSans.ttf' # Путь к файлу шрифта (в корне проекта)
+PDF_FONT_PATH = 'DejaVuSans.ttf' # Путь к файлу шрифта (ожидается в корне проекта)
 try:
     pdfmetrics.registerFont(TTFont('DejaVuSans', PDF_FONT_PATH))
-    PDF_FONT = 'DejaVuSans' # Используем наш шрифт, если он загрузился
+    PDF_FONT = 'DejaVuSans'
     logging.info(f"Шрифт '{PDF_FONT_PATH}' успешно зарегистрирован для PDF.")
 except Exception as e:
     logging.warning(
@@ -45,25 +42,47 @@ except Exception as e:
 
 router = Router()
 
-# Проверяем ADMIN_CHAT_ID при инициализации модуля
-if ADMIN_CHAT_ID is None:
-    logging.warning("ADMIN_CHAT_ID не задан. Админ-команды будут недоступны.")
+# --- Логирование и проверка ID администратора при запуске модуля ---
+ADMIN_ID = None
+try:
+    if ADMIN_CHAT_ID is not None: # Проверяем, что переменная вообще существует
+        ADMIN_ID = int(ADMIN_CHAT_ID)
+        logging.info(f"ADMIN_ID успешно загружен и проверен: {ADMIN_ID} (тип: {type(ADMIN_ID)})")
+    else:
+        # Эта ситуация возникает, если ADMIN_CHAT_ID = None в config.py
+        logging.warning("ADMIN_CHAT_ID не задан в конфигурации. Админ-команды будут недоступны.")
+except (ValueError, TypeError) as e:
+    # Обрабатываем ошибку, если ADMIN_CHAT_ID не None, но не может быть преобразован в int
+    logging.error(f"Некорректное значение ADMIN_CHAT_ID: '{ADMIN_CHAT_ID}'. Ошибка: {e}. Админ-команды не будут работать.")
+    ADMIN_ID = None # Убеждаемся, что ADMIN_ID будет None при ошибке
 
-# Фильтр для проверки, является ли пользователь админом
-# Можно использовать встроенный MagicFilter F.from_user.id == ADMIN_CHAT_ID
-# Или отдельную функцию/класс-фильтр
-def is_admin(message: Message) -> bool:
-    return ADMIN_CHAT_ID is not None and message.from_user.id == ADMIN_CHAT_ID
+# --- Magic Filter для проверки админа ---
+# Фильтр будет активен, только если ADMIN_ID успешно загружен как int
+ADMIN_FILTER = (F.from_user.id == ADMIN_ID) if isinstance(ADMIN_ID, int) else (lambda: False)
 
-@router.message(Command("set_prompt"), is_admin) # Используем фильтр
+# --- Логирующий "pre-handler" для админских команд ---
+# Регистрируем его перед основными хэндлерами, чтобы он сработал первым
+@router.message(Command("set_prompt", "chats", "pdf"))
+async def before_admin_cmd_log(message: Message) -> bool: # Указываем тип возврата bool
+    """Логирует получение потенциальной админ-команды ДО проверки прав."""
+    if message.from_user: # Убедимся, что пользователь есть
+        logging.info(f"Получена потенциальная админ-команда '{message.text.split()[0]}' от user {message.from_user.id} ({message.from_user.username or 'no username'})")
+    else:
+         logging.warning(f"Получена потенциальная админ-команда '{message.text.split()[0]}' без информации о пользователе.")
+    # ВАЖНО: Возвращаем False, чтобы aiogram попробовал следующий хэндлер в цепочке
+    return False
+
+# --- Основные хэндлеры админских команд с фильтром ---
+
+@router.message(Command("set_prompt"), ADMIN_FILTER)
 async def cmd_set_prompt(message: Message):
     """Устанавливает системный промпт для OpenAI (только админ)."""
-    # Извлекаем аргументы команды правильно
+    logging.info(f"Пользователь {message.from_user.id} (АДМИН) выполняет /set_prompt")
+    # Извлекаем аргументы команды
     new_prompt = message.text.split(maxsplit=1)[1].strip() if ' ' in message.text else ""
     if not new_prompt:
         await message.reply("❗️ Укажите новый шаблон после команды.\nПример: `/set_prompt Сделай краткую сводку:`")
         return
-
     try:
         await set_setting("summary_prompt", new_prompt)
         await message.reply("✅ Шаблон сводки обновлён.")
@@ -72,40 +91,65 @@ async def cmd_set_prompt(message: Message):
         await message.reply("❌ Не удалось сохранить настройку.")
 
 
-@router.message(Command("chats"), is_admin) # Используем фильтр
+@router.message(Command("chats"), ADMIN_FILTER)
 async def cmd_chats(message: Message):
     """Показывает список активных чатов (только админ)."""
+    logging.info(f"Пользователь {message.from_user.id} (АДМИН) выполняет /chats")
     try:
+        logging.info("Запрашиваю список зарегистрированных чатов из БД...")
         chat_ids = await get_registered_chats()
+        logging.info(f"Получено {len(chat_ids)} ID чатов из БД.")
         if not chat_ids:
             await message.reply("Нет зарегистрированных чатов.")
+            logging.info("Список чатов пуст.")
             return
 
         lines = ["<b>Активные чаты:</b>"]
+        logging.info("Начинаю получать информацию о чатах от Telegram API...")
+        processed_count = 0
         for cid in chat_ids:
             try:
-                chat_info = await message.bot.get_chat(cid)
+                logging.debug(f"Получение информации для chat_id: {cid}")
+                # Добавляем таймаут к запросу get_chat, если API Telegram медленно отвечает
+                chat_info = await message.bot.get_chat(chat_id=cid) # request_timeout=10
                 title = chat_info.title or chat_info.full_name or f"ID: {cid}"
-                link = f" (<a href='{chat_info.invite_link}'>ссылка</a>)" if chat_info.invite_link else ""
-                lines.append(f"• {title} (<code>{cid}</code>){link}")
+                link_part = ""
+                # Генерируем ссылку только для групп/каналов, не для приватных чатов
+                if chat_info.type in ('group', 'supergroup', 'channel'):
+                    invite_link = chat_info.invite_link
+                    # Если нет инвайт-ссылки, попробуем создать ее (требует прав админа у бота)
+                    # if not invite_link:
+                    #     try: invite_link = await message.bot.export_chat_invite_link(cid)
+                    #     except Exception: pass # Игнорируем ошибку, если не можем создать ссылку
+                    if invite_link:
+                        link_part = f" (<a href='{invite_link}'>ссылка</a>)"
+
+                lines.append(f"• {title} (<code>{cid}</code>){link_part}")
+                logging.debug(f"Успешно получена информация для chat_id: {cid}")
+                processed_count += 1
             except Exception as e:
+                # Логируем ошибку, но продолжаем для других чатов
                 logging.warning(f"Не удалось получить информацию о чате {cid}: {e}")
-                lines.append(f"• ID: <code>{cid}</code> (нет доступа?)")
+                lines.append(f"• ID: <code>{cid}</code> (ошибка доступа или чат не существует)")
+        logging.info(f"Информация о {processed_count} из {len(chat_ids)} чатов собрана.")
 
         full_text = "\n".join(lines)
         MAX_LEN = 4096
-        # Отправляем частями, если нужно
+        logging.info(f"Отправляю список чатов пользователю {message.from_user.id}...")
+        # Отправляем частями, если текст слишком длинный
         for i in range(0, len(full_text), MAX_LEN):
             await message.reply(full_text[i:i + MAX_LEN], parse_mode="HTML")
+        logging.info("Список чатов успешно отправлен.")
 
     except Exception as e:
-        logging.exception(f"Ошибка при выполнении команды /chats: {e}")
+        logging.exception(f"Критическая ошибка при выполнении команды /chats: {e}")
         await message.reply("❌ Произошла ошибка при получении списка чатов.")
 
 
-@router.message(Command("pdf"), is_admin) # Используем фильтр
+@router.message(Command("pdf"), ADMIN_FILTER)
 async def cmd_pdf(message: Message):
     """Создает PDF с историей сообщений за последние 24ч (только админ)."""
+    logging.info(f"Пользователь {message.from_user.id} (АДМИН) выполняет /pdf")
     args = message.text.split()
     if len(args) < 2 or not args[1].lstrip('-').isdigit():
         await message.reply("❗️ Укажите ID чата после команды.\nПример: `/pdf -1001234567890`")
@@ -119,7 +163,7 @@ async def cmd_pdf(message: Message):
 
     try:
         since_time = datetime.now(timezone.utc) - timedelta(days=1)
-        logging.info(f"Запрос PDF для чата {chat_id_to_fetch} с {since_time}")
+        logging.info(f"Запрос PDF для чата {chat_id_to_fetch} с {since_time.isoformat()}")
         messages_data = await get_messages_for_summary(chat_id_to_fetch, since_time)
 
         if not messages_data:
@@ -127,65 +171,57 @@ async def cmd_pdf(message: Message):
             return
 
         logging.info(f"Найдено {len(messages_data)} сообщений для PDF в чате {chat_id_to_fetch}.")
+        # --- Генерация PDF ---
         buf = io.BytesIO()
         c = canvas.Canvas(buf, pagesize=letter)
         width, height = letter
-
+        margin = 40
         textobject = c.beginText()
-        textobject.setTextOrigin(40, height - 40)
+        textobject.setTextOrigin(margin, height - margin)
         textobject.setFont(PDF_FONT, 8)
         line_height = 10
 
         for msg in messages_data:
             msg_timestamp = msg["timestamp"]
-            if msg_timestamp.tzinfo is None:
-                msg_timestamp = msg_timestamp.replace(tzinfo=timezone.utc)
-            elif msg_timestamp.tzinfo != timezone.utc:
-                msg_timestamp = msg_timestamp.astimezone(timezone.utc)
-
+            if msg_timestamp.tzinfo is None: msg_timestamp = msg_timestamp.replace(tzinfo=timezone.utc)
+            elif msg_timestamp.tzinfo != timezone.utc: msg_timestamp = msg_timestamp.astimezone(timezone.utc)
             msg_time_str = msg_timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')
             sender = msg.get("username", "Unknown User")
-            text = msg.get("text", "") or "[пустое сообщение]" # Обработка пустого текста
-
+            text = msg.get("text", "") or "[пустое сообщение]"
             header = f"[{msg_time_str}] {sender}:"
-            # Используем simpleSplit для переноса длинных строк
-            lines = simpleSplit(text, PDF_FONT, 8, width - 80)
+            lines = simpleSplit(text, PDF_FONT, 8, width - 2 * margin)
 
-            # Предварительная оценка места + запас
             required_lines = 1 + len(lines) + 1 # header + text + space
-            if textobject.getY() < 40 + line_height * required_lines:
+            if textobject.getY() < margin + line_height * required_lines:
                 c.drawText(textobject)
                 c.showPage()
-                textobject = c.beginText(40, height - 40)
+                textobject = c.beginText(margin, height - margin)
                 textobject.setFont(PDF_FONT, 8)
 
             textobject.textLine(header)
-            for line in lines:
-                 textobject.textLine(f"  {line}")
-            textobject.moveCursor(0, line_height / 2) # Отступ
+            for line in lines: textobject.textLine(f"  {line}")
+            textobject.moveCursor(0, line_height / 2)
 
         c.drawText(textobject)
         c.save()
         buf.seek(0)
+        # --- Конец генерации PDF ---
 
         pdf_filename = f"history_{chat_id_to_fetch}_{since_time.strftime('%Y%m%d')}.pdf"
+        logging.info(f"Отправка PDF {pdf_filename} пользователю {message.from_user.id}")
         await message.reply_document(
             InputFile(buf, filename=pdf_filename),
             caption=f"История чата <code>{chat_id_to_fetch}</code> за последние 24 часа."
         )
+        logging.info("PDF успешно отправлен.")
 
     except Exception as e:
-        logging.exception(f"Ошибка при создании PDF для чата {chat_id_to_fetch}: {e}")
+        logging.exception(f"Ошибка при создании или отправке PDF для чата {chat_id_to_fetch}: {e}")
         await message.reply("❌ Произошла ошибка при создании PDF.")
 
 
-# Этот хэндлер должен быть в user_handlers.py, чтобы не требовать админ прав
-# @router.message(Command("summary"))
-# async def cmd_summary_trigger(message: Message):
-#     """Создаёт саммари по сообщениям за 24 часа."""
-#     # ...
-
-
+# --- Функция отправки сводки (используется /summary и планировщиком) ---
+# Она остается без изменений с последней версии (где исправлен logging.success)
 async def send_summary(bot: Bot, chat_id: int):
     """Собирает сообщения за 24 часа, генерирует и отправляет сводку."""
     logging.info(f"Начало генерации сводки для чата {chat_id}")
@@ -198,27 +234,22 @@ async def send_summary(bot: Bot, chat_id: int):
         logging.info(f"📥 Получено сообщений: {len(messages_data)} для чата {chat_id}")
     except Exception as e:
         logging.exception(f"❌ Ошибка при получении сообщений для сводки чата {chat_id}: {e}")
-        # Не спамим в чат, если ошибка на нашей стороне
-        # await bot.send_message(chat_id, "⚠️ Не удалось получить сообщения для создания сводки.")
-        return
+        return # Просто выходим, не спамим в чат
 
-    MIN_MESSAGES_FOR_SUMMARY = 5 # Можно вынести в config.py
+    MIN_MESSAGES_FOR_SUMMARY = 5
     if not messages_data or len(messages_data) < MIN_MESSAGES_FOR_SUMMARY:
         logging.info(f"Недостаточно сообщений ({len(messages_data)}) для сводки в чате {chat_id}.")
-        # Не уведомляем чат об этом, чтобы не спамить
-        return
+        return # Не спамим в чат
 
     message_blocks = []
     for m in messages_data:
         msg_timestamp = m["timestamp"]
-        if msg_timestamp.tzinfo is None:
-            msg_timestamp = msg_timestamp.replace(tzinfo=timezone.utc)
-        elif msg_timestamp.tzinfo != timezone.utc:
-            msg_timestamp = msg_timestamp.astimezone(timezone.utc)
+        if msg_timestamp.tzinfo is None: msg_timestamp = msg_timestamp.replace(tzinfo=timezone.utc)
+        elif msg_timestamp.tzinfo != timezone.utc: msg_timestamp = msg_timestamp.astimezone(timezone.utc)
         ts = msg_timestamp.strftime('%H:%M')
         sender = m.get("username", "Unknown")
         text = m.get("text", "") or "[пусто]"
-        MAX_MSG_LEN = 1000 # Лимит длины одного сообщения для OpenAI
+        MAX_MSG_LEN = 1000
         message_blocks.append(f"[{ts}] {sender}: {text[:MAX_MSG_LEN]}")
 
     default_prompt = "Сделай очень краткую сводку (summary) следующих сообщений в чате за последние 24 часа. Выдели основные темы и ключевые моменты. Ответ дай на русском языке."
@@ -233,27 +264,28 @@ async def send_summary(bot: Bot, chat_id: int):
         summary_text = await summarize_chat(message_blocks, system_prompt=summary_prompt)
     except Exception as e:
         logging.exception(f"❌ Ошибка при запросе к OpenAI для чата {chat_id}: {e}")
-        # Уведомляем чат об ошибке, но без деталей
         try: await bot.send_message(chat_id, "⚠️ Произошла ошибка при генерации сводки.")
         except Exception: pass
         return
 
     if not summary_text:
         logging.warning(f"OpenAI вернул пустую сводку для чата {chat_id}.")
-        # Не уведомляем, если модель просто ничего не вернула
-        return
+        return # Не отправляем ничего, если ответ пуст
 
     try:
         full_summary_text = f"📝 <b>Сводка за последние 24 часа:</b>\n\n{summary_text}"
         MAX_LEN = 4096
         for i in range(0, len(full_summary_text), MAX_LEN):
             await bot.send_message(chat_id, full_summary_text[i:i + MAX_LEN], parse_mode="HTML")
+
+        # Исправлено logging.success на logging.info
         logging.info(f"✅ Сводка успешно отправлена в чат {chat_id}")
         await set_setting(f"last_summary_ts_{chat_id}", now_aware.isoformat())
     except Exception as e:
         logging.exception(f"❌ Ошибка при отправке сводки в чат {chat_id}: {e}")
 
 
+# --- Настройка планировщика ---
 def setup_scheduler(bot: Bot):
     """Настраивает и запускает планировщик для ежедневной отправки сводок."""
     scheduler = AsyncIOScheduler(timezone="UTC")
@@ -261,15 +293,15 @@ def setup_scheduler(bot: Bot):
         scheduler.add_job(
             trigger_all_summaries,
             trigger="cron",
-            hour=21, # 21:00 UTC
-            minute=0,
+            hour=21, minute=0, # 21:00 UTC
             args=[bot],
             id="daily_summaries",
             replace_existing=True,
-            misfire_grace_time=300 # Даем 5 минут на запуск, если пропустили
+            misfire_grace_time=300
         )
         scheduler.start()
-        logging.info(f"Планировщик настроен на ежедневный запуск сводок в {scheduler.get_job('daily_summaries').next_run_time.strftime('%Y-%m-%d %H:%M:%S %Z')}.")
+        next_run = scheduler.get_job('daily_summaries').next_run_time
+        logging.info(f"Планировщик настроен. Следующий запуск сводок: {next_run.strftime('%Y-%m-%d %H:%M:%S %Z') if next_run else 'нет'}.")
     except Exception as e:
         logging.exception(f"❌ Не удалось запустить планировщик: {e}")
 
@@ -288,15 +320,11 @@ async def trigger_all_summaries(bot: Bot):
                 last_summary_ts_str = await get_setting(f"last_summary_ts_{chat_id}")
                 if last_summary_ts_str:
                     last_summary_time = datetime.fromisoformat(last_summary_ts_str)
-                    if last_summary_time.tzinfo is None:
-                        last_summary_time = last_summary_time.replace(tzinfo=timezone.utc)
-                    elif last_summary_time.tzinfo != timezone.utc:
-                        last_summary_time = last_summary_time.astimezone(timezone.utc)
-
-                    # Не отправляем, если последняя сводка была менее 23 часов назад
+                    if last_summary_time.tzinfo is None: last_summary_time = last_summary_time.replace(tzinfo=timezone.utc)
+                    elif last_summary_time.tzinfo != timezone.utc: last_summary_time = last_summary_time.astimezone(timezone.utc)
                     if current_time - last_summary_time < timedelta(hours=23):
                         should_send = False
-                        logging.info(f"Пропуск автоматической сводки для чата {chat_id}, т.к. последняя была в {last_summary_time.isoformat()}.")
+                        logging.info(f"Пропуск авто-сводки для чата {chat_id}, последняя была в {last_summary_time.isoformat()}.")
             except ValueError:
                 logging.warning(f"Некорректный формат времени последней сводки для чата {chat_id}: {last_summary_ts_str}")
             except Exception as e:
@@ -305,12 +333,10 @@ async def trigger_all_summaries(bot: Bot):
             if should_send:
                 logging.info(f"Запуск задачи сводки для чата {chat_id}...")
                 try:
-                    # Запускаем последовательно, чтобы не перегружать API/DB
+                    # Запускаем последовательно
                     await send_summary(bot, chat_id)
                 except Exception as e:
                     logging.exception(f"❌ Исключение при вызове send_summary для чата {chat_id} в планировщике: {e}")
-            # else: # Лог пропуска уже есть выше
-            #    logging.info(f"Сводка для чата {chat_id} пропущена по условию времени.")
 
     except Exception as e:
         logging.exception(f"❌ Критическая ошибка при выполнении trigger_all_summaries: {e}")
