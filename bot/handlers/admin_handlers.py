@@ -20,8 +20,6 @@ from reportlab.pdfbase.ttfonts import TTFont
 from db.db import (
     get_registered_chats,
     get_messages_for_summary,
-    get_setting,
-    set_setting
 )
 from api_clients.openrouter import summarize_chat
 from config.config import ADMIN_CHAT_ID # Импортируем ID админа (int или None)
