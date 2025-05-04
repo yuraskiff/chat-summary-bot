@@ -1,10 +1,12 @@
-# --- START OF FILE bot/handlers/user_handlers.py ---
+# --- START OF FILE user_handlers.py ---
 
 import logging
 from datetime import timezone # Импортируем для работы с временными метками
 
-from aiogram import Router, types
-from aiogram.filters import Command, CommandStart # Добавили CommandStart
+from aiogram import Router
+# ----> ИЗМЕНЕННЫЙ ИМПОРТ <----
+from aiogram.types import Message
+from aiogram.filters import Command, CommandStart
 
 # Импортируем функции из других модулей
 from db.db import save_message, register_chat
@@ -14,8 +16,9 @@ from bot.handlers.admin_handlers import send_summary
 router = Router()
 
 # ----> ОБРАБОТЧИК КОМАНДЫ /start <----
+# Используем Message напрямую
 @router.message(CommandStart())
-async def cmd_start(message: types.Message):
+async def cmd_start(message: Message):
     """Обработчик команды /start. Отправляет приветственное сообщение."""
     user_name = message.from_user.full_name
     # Формируем приветственное сообщение с HTML-разметкой
@@ -32,15 +35,16 @@ async def cmd_start(message: types.Message):
         f"<code>/chats</code>, <code>/pdf ID_ЧАТА</code>, <code>/set_prompt ТЕКСТ_ПРОМПТА</code>."
     )
     try:
+        # Отправляем ответ с указанием parse_mode
         await message.reply(text, parse_mode="HTML")
     except Exception as e:
         # Логируем ошибку, но не сообщаем пользователю, если это просто /start
         logging.exception(f"Ошибка при отправке ответа на /start пользователю {message.from_user.id}: {e}")
 
 # ----> ОБРАБОТЧИК КОМАНДЫ /summary <----
-# Этот обработчик доступен всем
+# Используем Message напрямую
 @router.message(Command("summary"))
-async def cmd_summary(message: types.Message):
+async def cmd_summary(message: Message):
     """Позволяет любому участнику чата вызвать сводку за последние 24 часа."""
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else "unknown"
@@ -51,12 +55,15 @@ async def cmd_summary(message: types.Message):
     except Exception as e:
         logging.exception(f"Критическая ошибка при обработке /summary для чата {chat_id}: {e}")
         try:
+            # Отправляем сообщение об ошибке пользователю
             await message.reply("❌ Произошла непредвиденная ошибка при запросе сводки.")
-        except Exception: pass
+        except Exception as send_error:
+            # Логируем, если даже сообщение об ошибке отправить не удалось
+             logging.error(f"Не удалось отправить сообщение об ошибке /summary в чат {chat_id}: {send_error}")
 
 
 # ----> ОБЩИЙ ОБРАБОТЧИК СООБЩЕНИЙ (для сохранения) <----
-# Регистрируем его без фильтров, чтобы он ловил все, что не поймали команды
+# Используем Message напрямую
 @router.message()
 async def handle_message(message: Message):
     """
@@ -64,40 +71,44 @@ async def handle_message(message: Message):
     и сохраняет текст сообщения или подпись к медиа в БД.
     Игнорирует сообщения, начинающиеся со слеша (команды).
     """
-    # Не обрабатываем сообщения без отправителя (например, системные)
+    # Не обрабатываем сообщения без отправителя (например, системные канальные посты)
     if not message.from_user:
         return
 
-    # Регистрируем чат
+    # Регистрируем чат (ON CONFLICT DO NOTHING в db.py)
     await register_chat(message.chat.id)
 
     # Определяем текст для сохранения
     text_to_save = None
+    # Сохраняем только если есть текст и он не начинается с "/"
     if message.text and not message.text.startswith('/'):
         text_to_save = message.text
+    # Или если есть подпись к медиа
     elif message.caption:
         text_to_save = message.caption
 
+    # Сохраняем, если есть что сохранять
     if text_to_save:
+        # Используем message.date (aware datetime от Telegram)
         timestamp_to_save = message.date
+        # Дополнительная проверка и приведение к UTC для надежности
         if timestamp_to_save.tzinfo is None:
             timestamp_to_save = timestamp_to_save.replace(tzinfo=timezone.utc)
         elif timestamp_to_save.tzinfo != timezone.utc:
             timestamp_to_save = timestamp_to_save.astimezone(timezone.utc)
 
+        # Определяем имя пользователя (username или full_name, или ID как fallback)
         sender_name = message.from_user.username or message.from_user.full_name or f"User_{message.from_user.id}"
 
-        # Сохраняем в фоне, чтобы не блокировать ответ пользователю (если бы он был)
-        # asyncio.create_task(save_message(...)) # Можно так, но для БД лучше await
         try:
             await save_message(
                 chat_id=message.chat.id,
                 username=sender_name,
                 text=text_to_save,
-                timestamp=timestamp_to_save
+                timestamp=timestamp_to_save # Передаем aware datetime
             )
         except Exception as e:
-            # Логируем, но не сообщаем пользователю об ошибке сохранения
+            # Логируем ошибку сохранения, но не беспокоим пользователя
             logging.exception(f"Ошибка при сохранении сообщения в БД для чата {message.chat.id}: {e}")
 
-# --- END OF FILE bot/handlers/user_handlers.py ---
+# --- END OF FILE user_handlers.py ---
