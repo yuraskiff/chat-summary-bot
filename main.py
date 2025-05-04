@@ -50,7 +50,7 @@ except Exception as e:
 
 # --- Подключение Middleware ---
 if ADMIN_CHAT_ID:
-    dp.message.middleware(AuthMiddleware())
+#    dp.message.middleware(AuthMiddleware())
     logging.info("AuthMiddleware подключен.")
 else:
     logging.warning("AuthMiddleware не подключен, т.к. ADMIN_CHAT_ID не задан.")
