@@ -25,7 +25,6 @@ async def init_pool():
         # Создаем пул соединений
         pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10, command_timeout=60)
         if not pool:
-             # Эта проверка на случай, если create_pool вернет None (хотя обычно вызывает исключение)
              logging.critical("Не удалось создать пул соединений с БД (pool is None).")
              raise ConnectionError("Failed to create database pool")
         logging.info("Пул соединений с БД успешно инициализирован.")
@@ -97,7 +96,7 @@ async def _get_connection() -> asyncpg.Connection:
         logging.error("Пул БД не инициализирован! Невозможно получить соединение.")
         raise ConnectionError("Database pool is not initialized or already closed")
     try:
-        # Получаем соединение с таймаутом, чтобы не ждать вечно
+        # Получаем соединение с таймаутом
         conn = await pool.acquire(timeout=10)
         if not conn:
              raise ConnectionError("Failed to acquire connection from pool (timeout or pool closed)")
@@ -110,11 +109,9 @@ async def _release_connection(conn: asyncpg.Connection):
     """Вспомогательная функция для безопасного возвращения соединения в пул."""
     if pool and conn and not conn.is_closed():
         try:
-            # Возвращаем соединение в пул
             await pool.release(conn, timeout=5)
         except Exception as e:
             logging.exception(f"Ошибка при возврате соединения в пул: {e}")
-            # Если не удалось вернуть, пытаемся закрыть соединение
             try:
                 await conn.close()
             except Exception as close_exc:
@@ -123,31 +120,32 @@ async def _release_connection(conn: asyncpg.Connection):
          logging.warning("Попытка вернуть соединение при неинициализированном пуле.")
 
 
+# ----> ИСПРАВЛЕННАЯ ВЕРСИЯ save_message <----
 async def save_message(chat_id: int, username: str, text: str, timestamp: datetime):
-    """Сохраняет сообщение, преобразуя timestamp в строку ISO 8601 для передачи в БД."""
+    """Сохраняет сообщение, передавая объект aware datetime в БД с явным кастом типа."""
     conn: Optional[asyncpg.Connection] = None
     try:
         conn = await _get_connection()
-        # 1. Убеждаемся, что время aware и в UTC
+        # 1. Убеждаемся, что время aware и в UTC (это остается важным!)
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
         elif timestamp.tzinfo != timezone.utc:
             timestamp = timestamp.astimezone(timezone.utc)
 
-        # 2. Преобразуем aware UTC datetime в строку ISO 8601
-        # PostgreSQL понимает этот формат для TIMESTAMPTZ
-        timestamp_iso = timestamp.isoformat()
-
-        # 3. Передаем строку в запрос
+        # 2. Передаем объект datetime в запрос, НО добавляем каст ::TIMESTAMPTZ в SQL
         await conn.execute(
             """
             INSERT INTO messages(chat_id, username, text, "timestamp")
-            VALUES($1, $2, $3, $4::TIMESTAMPTZ) -- Оставляем каст на всякий случай
+            -- Добавляем ::TIMESTAMPTZ к параметру $4, чтобы помочь PostgreSQL
+            VALUES($1, $2, $3, $4::TIMESTAMPTZ)
             """,
-            chat_id, username, text, timestamp_iso # Передаем строку timestamp_iso
+            chat_id, username, text, timestamp # Передаем ОБЪЕКТ datetime
         )
+    except asyncpg.exceptions.DataError as de:
+         # Ловим ошибку данных, если проблема с типами осталась
+         logging.exception(f"❌ Ошибка данных asyncpg при сохранении сообщения в чате {chat_id}: {de}. Аргумент $4: {timestamp} (tz={timestamp.tzinfo}), тип: {type(timestamp)}")
     except Exception as e:
-        # Логируем исключение с traceback
+        # Ловим другие ошибки
         logging.exception(f"❌ Ошибка при сохранении сообщения в чате {chat_id}: {e}")
     finally:
         if conn: await _release_connection(conn)
@@ -165,7 +163,6 @@ async def register_chat(chat_id: int):
         # Проверяем результат команды INSERT
         if result == "INSERT 0 1":
             logging.info(f"Чат {chat_id} успешно зарегистрирован.")
-        # Если был конфликт (чат уже есть), лог не нужен.
     except Exception as e:
         logging.exception(f"❌ Ошибка при регистрации чата {chat_id}: {e}")
     finally:
@@ -182,7 +179,6 @@ async def get_registered_chats() -> List[int]:
         chats = [r["chat_id"] for r in rows]
     except Exception as e:
         logging.exception(f"❌ Ошибка при получении списка зарегистрированных чатов: {e}")
-        # Возвращаем пустой список при ошибке
     finally:
         if conn: await _release_connection(conn)
     return chats
@@ -202,7 +198,6 @@ async def get_messages_for_summary(chat_id: int, since: datetime) -> List[Dict]:
             logging.warning(f"Получено non-UTC aware datetime ({since.tzinfo}) в get_messages_for_summary, преобразуем в UTC.")
             since = since.astimezone(timezone.utc)
 
-        # ----> КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: ДОБАВЛЕНО ::TIMESTAMPTZ <----
         # Явно приводим тип параметра $2 к TIMESTAMPTZ для PostgreSQL
         rows = await conn.fetch(
             """
@@ -211,23 +206,20 @@ async def get_messages_for_summary(chat_id: int, since: datetime) -> List[Dict]:
             WHERE chat_id = $1 AND "timestamp" >= $2::TIMESTAMPTZ
             ORDER BY "timestamp" ASC
             """,
-            chat_id, since # Передаем уже подготовленный aware UTC datetime
+            chat_id, since # Передаем подготовленный aware UTC datetime
         )
-        # asyncpg корректно декодирует TIMESTAMPTZ из БД в aware datetime (UTC)
         messages = [
             {"username": r["username"], "text": r["text"], "timestamp": r["timestamp"]}
             for r in rows
         ]
     except asyncpg.exceptions.DataError as de:
-         # Ловим конкретную ошибку данных, если она все еще возникает (маловероятно теперь)
          logging.exception(f"❌ Ошибка данных asyncpg при получении сообщений для сводки чата {chat_id} с {since}: {de}. Аргумент $2: {since} (tz={since.tzinfo})")
          logging.error(f"Тип аргумента 'since': {type(since)}")
     except Exception as e:
-        # Логируем другие возможные ошибки
         logging.exception(f"❌ Ошибка при получении сообщений для сводки чата {chat_id} с {since}: {e}")
     finally:
         if conn: await _release_connection(conn)
-    return messages # Возвращаем пустой список в случае ошибки
+    return messages
 
 
 async def get_setting(key: str) -> Optional[str]:
@@ -236,13 +228,12 @@ async def get_setting(key: str) -> Optional[str]:
     value = None
     try:
         conn = await _get_connection()
-        # Используем fetchval для получения одного значения или None
         value = await conn.fetchval("SELECT value FROM settings WHERE key = $1", key)
     except Exception as e:
         logging.exception(f"❌ Ошибка при получении настройки '{key}': {e}")
     finally:
         if conn: await _release_connection(conn)
-    return value # Возвращает None, если ключ не найден или произошла ошибка
+    return value
 
 
 async def set_setting(key: str, value: str):
@@ -260,8 +251,6 @@ async def set_setting(key: str, value: str):
         )
     except Exception as e:
         logging.exception(f"❌ Ошибка при установке настройки '{key}': {e}")
-        # Возможно, стоит перевыбросить исключение, если это критично
-        # raise e
     finally:
         if conn: await _release_connection(conn)
 
