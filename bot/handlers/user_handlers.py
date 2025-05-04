@@ -35,6 +35,11 @@ async def handle_message(message: types.Message):
     # Сохраняем, если есть что сохранять
     if text_to_save:
         await save_message(
+            message.chat.id,
+            message.from_user.full_name,
+            text_to_save,
+            message.date
+        )age(
             chat_id=message.chat.id,
             username=message.from_user.username or message.from_user.full_name,
             text=text_to_save,
