@@ -49,37 +49,25 @@ if ADMIN_CHAT_ID is None:
     logging.warning("ADMIN_CHAT_ID не задан или некорректен в config.py. Админ-команды будут недоступны.")
 elif not isinstance(ADMIN_CHAT_ID, int):
      logging.error(f"ADMIN_CHAT_ID из config.py не является числом (тип: {type(ADMIN_CHAT_ID)}). Админ-команды не будут работать.")
-     # Устанавливаем в None, чтобы фильтр точно не пропускал
-     ADMIN_CHAT_ID = None # Это изменит импортированное значение только в этом модуле
+     ADMIN_CHAT_ID = None # Устанавливаем в None, чтобы фильтр не пропускал
 else:
      logging.info(f"ADMIN_CHAT_ID для проверки прав администратора: {ADMIN_CHAT_ID}")
 
 
 # --- Magic Filter для проверки админа (используем импортированный ADMIN_CHAT_ID) ---
-# Фильтр будет активен, только если ADMIN_CHAT_ID является int
+# Используется для /set_prompt и /pdf
 ADMIN_FILTER = (F.from_user.id == ADMIN_CHAT_ID) if isinstance(ADMIN_CHAT_ID, int) else (lambda: False)
 
 
-# --- Логирующий "pre-handler" для админских команд ---
-# Регистрируем его перед основными хэндлерами админских команд
-@router.message(Command("set_prompt", "chats", "pdf"))
-async def before_admin_cmd_log(message: Message) -> bool: # Указываем тип возврата bool
-    """Логирует получение потенциальной админ-команды ДО проверки прав."""
-    if message.from_user:
-        # Логируем ID пользователя и проверяемое значение ADMIN_CHAT_ID
-        is_admin_check = (isinstance(ADMIN_CHAT_ID, int) and message.from_user.id == ADMIN_CHAT_ID)
-        logging.info(
-            f"Получена потенциальная админ-команда '{message.text.split()[0]}' от user {message.from_user.id} ({message.from_user.username or 'no username'}). "
-            f"Проверяемый ADMIN_CHAT_ID={ADMIN_CHAT_ID} (тип: {type(ADMIN_CHAT_ID)}). Результат проверки прав: {is_admin_check}"
-        )
-    else:
-         logging.warning(f"Получена потенциальная админ-команда '{message.text.split()[0]}' без информации о пользователе.")
-    # ВАЖНО: Возвращаем False, чтобы aiogram попробовал следующий хэндлер в цепочке
-    return False
+# --- ЛОГИРУЮЩИЙ PRE-HANDLER УДАЛЕН / ЗАКОММЕНТИРОВАН ---
+# @router.message(Command("set_prompt", "chats", "pdf"))
+# async def before_admin_cmd_log(message: Message) -> bool:
+#     # ... (код удален) ...
+#     return False
+
 
 # --- Основные хэндлеры админских команд ---
 
-# cmd_set_prompt остается с фильтром
 @router.message(Command("set_prompt"), ADMIN_FILTER)
 async def cmd_set_prompt(message: Message):
     """Устанавливает системный промпт для OpenAI (только админ)."""
@@ -95,8 +83,8 @@ async def cmd_set_prompt(message: Message):
         logging.exception(f"Ошибка при сохранении настройки summary_prompt: {e}")
         await message.reply("❌ Не удалось сохранить настройку.")
 
-# ----> ИЗМЕНЕННЫЙ CMD_CHATS: БЕЗ ФИЛЬТРА, С ВНУТРЕННЕЙ ПРОВЕРКОЙ <----
-@router.message(Command("chats")) # <--- УБРАН ADMIN_FILTER
+# ----> CMD_CHATS БЕЗ ФИЛЬТРА В ДЕКОРАТОРЕ, С ВНУТРЕННЕЙ ПРОВЕРКОЙ <----
+@router.message(Command("chats")) # <--- Фильтр ADMIN_FILTER убран отсюда
 async def cmd_chats(message: Message):
     """Показывает список активных чатов (проверка админа внутри)."""
     # Логгируем вызов хэндлера ДО проверки прав
@@ -105,9 +93,7 @@ async def cmd_chats(message: Message):
     # ----> ЯВНАЯ ПРОВЕРКА ПРАВ АДМИНИСТРАТОРА <----
     if not isinstance(ADMIN_CHAT_ID, int) or message.from_user.id != ADMIN_CHAT_ID:
         logging.warning(f"Доступ к /chats запрещен для user {message.from_user.id}. ADMIN_CHAT_ID={ADMIN_CHAT_ID}")
-        # Молча игнорируем или можно отправить сообщение
-        # await message.reply("У вас нет прав для выполнения этой команды.")
-        return # Завершаем выполнение хэндлера
+        return # Молча завершаем выполнение хэндлера
 
     # Если проверка пройдена:
     logging.info(f"Пользователь {message.from_user.id} (АДМИН={ADMIN_CHAT_ID}) прошел проверку и выполняет /chats")
@@ -154,33 +140,29 @@ async def cmd_chats(message: Message):
         logging.exception(f"Критическая ошибка при выполнении команды /chats: {e}")
         await message.reply("❌ Произошла ошибка при получении списка чатов.")
 
-# cmd_pdf остается с фильтром
+# cmd_pdf остается с фильтром ADMIN_FILTER
 @router.message(Command("pdf"), ADMIN_FILTER)
 async def cmd_pdf(message: Message):
     """Создает PDF с историей сообщений за последние 24ч (только админ)."""
     logging.info(f"Пользователь {message.from_user.id} (АДМИН={ADMIN_CHAT_ID}) выполняет /pdf")
+    # ... (остальной код cmd_pdf без изменений) ...
     args = message.text.split()
     if len(args) < 2 or not args[1].lstrip('-').isdigit():
         await message.reply("❗️ Укажите ID чата после команды.\nПример: `/pdf -1001234567890`")
         return
-
     try:
         chat_id_to_fetch = int(args[1])
     except ValueError:
         await message.reply("❗️ Некорректный ID чата.")
         return
-
     try:
         since_time = datetime.now(timezone.utc) - timedelta(days=1)
         logging.info(f"Запрос PDF для чата {chat_id_to_fetch} с {since_time.isoformat()}")
         messages_data = await get_messages_for_summary(chat_id_to_fetch, since_time)
-
         if not messages_data:
             await message.reply(f"Сообщений в чате <code>{chat_id_to_fetch}</code> за последние 24 часа не найдено.")
             return
-
         logging.info(f"Найдено {len(messages_data)} сообщений для PDF в чате {chat_id_to_fetch}.")
-        # --- Генерация PDF ---
         buf = io.BytesIO()
         c = canvas.Canvas(buf, pagesize=letter)
         width, height = letter
@@ -189,7 +171,6 @@ async def cmd_pdf(message: Message):
         textobject.setTextOrigin(margin, height - margin)
         textobject.setFont(PDF_FONT, 8)
         line_height = 10
-
         for msg in messages_data:
             msg_timestamp = msg["timestamp"]
             if msg_timestamp.tzinfo is None: msg_timestamp = msg_timestamp.replace(tzinfo=timezone.utc)
@@ -199,23 +180,18 @@ async def cmd_pdf(message: Message):
             text = msg.get("text", "") or "[пустое сообщение]"
             header = f"[{msg_time_str}] {sender}:"
             lines = simpleSplit(text, PDF_FONT, 8, width - 2 * margin)
-
-            required_lines = 1 + len(lines) + 1 # header + text + space
+            required_lines = 1 + len(lines) + 1
             if textobject.getY() < margin + line_height * required_lines:
                 c.drawText(textobject)
                 c.showPage()
                 textobject = c.beginText(margin, height - margin)
                 textobject.setFont(PDF_FONT, 8)
-
             textobject.textLine(header)
             for line in lines: textobject.textLine(f"  {line}")
-            textobject.moveCursor(0, line_height / 2) # Отступ
-
+            textobject.moveCursor(0, line_height / 2)
         c.drawText(textobject)
         c.save()
         buf.seek(0)
-        # --- Конец генерации PDF ---
-
         pdf_filename = f"history_{chat_id_to_fetch}_{since_time.strftime('%Y%m%d')}.pdf"
         logging.info(f"Отправка PDF {pdf_filename} пользователю {message.from_user.id}")
         await message.reply_document(
@@ -223,14 +199,13 @@ async def cmd_pdf(message: Message):
             caption=f"История чата <code>{chat_id_to_fetch}</code> за последние 24 часа."
         )
         logging.info("PDF успешно отправлен.")
-
     except Exception as e:
         logging.exception(f"Ошибка при создании или отправке PDF для чата {chat_id_to_fetch}: {e}")
         await message.reply("❌ Произошла ошибка при создании PDF.")
 
 
 # --- Функция отправки сводки ---
-# (код send_summary без изменений с прошлой версии)
+# (код send_summary без изменений)
 async def send_summary(bot: Bot, chat_id: int):
     logging.info(f"Начало генерации сводки для чата {chat_id}")
     now_aware = datetime.now(timezone.utc)
@@ -285,7 +260,7 @@ async def send_summary(bot: Bot, chat_id: int):
 
 
 # --- Настройка планировщика ---
-# (код setup_scheduler и trigger_all_summaries без изменений с прошлой версии)
+# (код setup_scheduler и trigger_all_summaries без изменений)
 def setup_scheduler(bot: Bot):
     scheduler = AsyncIOScheduler(timezone="UTC")
     try:
