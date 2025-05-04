@@ -104,10 +104,10 @@ except Exception as e:
 
 
 # --- Подключение роутеров ---
-dp.include_router(user_handlers.router)
-dp.include_router(chat_handlers.router)
+#dp.include_router(user_handlers.router)
+#dp.include_router(chat_handlers.router)
 dp.include_router(admin_handlers.router)
-logger.info("Роутеры подключены: user, chat, admin.")
+logger.info("Роутеры подключены: ТОЛЬКО admin.")
 
 # --- Функции жизненного цикла веб-приложения ---
 
