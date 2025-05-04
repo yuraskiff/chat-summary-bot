@@ -2,30 +2,35 @@
 
 import os
 import logging
-import sys
+import sys # Для sys.exit
 from dotenv import load_dotenv
 
 # Импорты aiogram и typing (оставляем как есть)
-from typing import Callable, Dict, Any, Awaitable
-from aiogram import Bot, Dispatcher, F, BaseMiddleware
-from aiogram.types import Update, Message
+# from typing import Callable, Dict, Any, Awaitable # Не нужно без middleware
+# from aiogram import BaseMiddleware # Не нужно без middleware
+# from aiogram.types import Update # Не нужно без middleware
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message # Оставляем, т.к. может использоваться где-то еще
+
 from aiogram.client.default import DefaultBotProperties
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 
 # Импортируем роутеры и функцию настройки планировщика
 from bot.handlers import user_handlers, chat_handlers, admin_handlers
-# from bot.middleware.auth_middleware import AuthMiddleware # Оставляем закомментированным
+# from bot.middleware.auth_middleware import AuthMiddleware # Оставляем AuthMiddleware закомментированным
 
 # Импортируем функции для работы с БД и конфигурацию
 try:
     from db.db import init_pool, close_pool
     from config.config import BOT_TOKEN, WEBHOOK_HOST, WEBHOOK_PATH, PORT, ADMIN_CHAT_ID
 except (ImportError, ValueError) as e:
+     # Ловим ошибки импорта или ValueErrors из config.py на самом раннем этапе
      logging.basicConfig(level=logging.CRITICAL, format="%(asctime)s - %(levelname)s - %(message)s")
      logging.critical(f"Критическая ошибка при загрузке конфигурации или зависимостей: {e}")
      sys.exit(f"Критическая ошибка конфигурации: {e}")
 
+# Загружаем переменные окружения из .env файла (на случай локального запуска)
 load_dotenv()
 
 # --- Настройка логирования ---
@@ -37,20 +42,25 @@ logging.basicConfig(
     stream=sys.stdout,
     force=True
 )
+# Уменьшаем "болтливость" библиотек, но оставляем DEBUG для диспетчера
 logging.getLogger("aiogram.client.session").setLevel(logging.INFO)
 logging.getLogger("aiogram.webhook.aiohttp_server").setLevel(logging.INFO)
 logging.getLogger("aiogram.dispatcher").setLevel(logging.DEBUG) # Оставляем DEBUG для диспетчера
 logging.getLogger("aiohttp.access").setLevel(logging.INFO)
 logging.getLogger("apscheduler").setLevel(logging.INFO)
 logging.getLogger("asyncpg").setLevel(logging.INFO)
+
+# Логгер для нашего приложения
 logger = logging.getLogger(__name__)
 
-# --- Middleware для логирования (удален/закомментирован) ---
+
+# --- Middleware для логирования (остается удаленным/закомментированным) ---
 # class UpdateTypeLoggerMiddleware...
 # dp.update.middleware(...)
 
 # --- Инициализация Bot и Dispatcher ---
 try:
+    # Используем DefaultBotProperties для parse_mode
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
     logger.info("Bot и Dispatcher инициализированы.")
@@ -59,7 +69,8 @@ except Exception as e:
     sys.exit("Ошибка инициализации Aiogram.")
 
 # --- Подключение Middleware ---
-# dp.message.middleware(AuthMiddleware()) # Оставляем AuthMiddleware закомментированным
+# dp.message.middleware(AuthMiddleware()) # AuthMiddleware остается закомментированным
+# dp.update.middleware(UpdateTypeLoggerMiddleware()) # Логгирующий middleware остается закомментированным
 
 # --- Подключение роутеров ---
 # ----> РАСКОММЕНТИРОВАНЫ ВСЕ РОУТЕРЫ <----
