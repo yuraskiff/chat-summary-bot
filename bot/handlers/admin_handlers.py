@@ -248,7 +248,7 @@ async def send_summary(bot: Bot, chat_id: int):
         MAX_LEN = 4096
         for i in range(0, len(full_summary_text), MAX_LEN):
             await bot.send_message(chat_id, full_summary_text[i:i + MAX_LEN], parse_mode="HTML")
-        logging.success(f"✅ Сводка успешно отправлена в чат {chat_id}")
+        logging.info(f"✅ Сводка успешно отправлена в чат {chat_id}")
         await set_setting(f"last_summary_ts_{chat_id}", now_aware.isoformat())
     except Exception as e:
         logging.exception(f"❌ Ошибка при отправке сводки в чат {chat_id}: {e}")
