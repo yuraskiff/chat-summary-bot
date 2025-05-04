@@ -24,6 +24,7 @@ from db.db import (
 )
 # Убедитесь, что импорт функции из openrouter корректен
 from api_clients.openrouter import summarize_chat
+# ----> ИМПОРТИРУЕМ ADMIN_CHAT_ID (уже должен быть int или None из config.py) <----
 from config.config import ADMIN_CHAT_ID
 
 # --- Настройка шрифта для PDF ---
@@ -31,7 +32,7 @@ PDF_FONT = 'Helvetica' # Шрифт по умолчанию
 PDF_FONT_PATH = 'DejaVuSans.ttf' # Путь к файлу шрифта (ожидается в корне проекта)
 try:
     pdfmetrics.registerFont(TTFont('DejaVuSans', PDF_FONT_PATH))
-    PDF_FONT = 'DejaVuSans'
+    PDF_FONT = 'DejaVuSans' # Используем наш шрифт, если он загрузился
     logging.info(f"Шрифт '{PDF_FONT_PATH}' успешно зарегистрирован для PDF.")
 except Exception as e:
     logging.warning(
@@ -42,31 +43,35 @@ except Exception as e:
 
 router = Router()
 
-# --- Логирование и проверка ID администратора при запуске модуля ---
-ADMIN_ID = None
-try:
-    if ADMIN_CHAT_ID is not None: # Проверяем, что переменная вообще существует
-        ADMIN_ID = int(ADMIN_CHAT_ID)
-        logging.info(f"ADMIN_ID успешно загружен и проверен: {ADMIN_ID} (тип: {type(ADMIN_ID)})")
-    else:
-        # Эта ситуация возникает, если ADMIN_CHAT_ID = None в config.py
-        logging.warning("ADMIN_CHAT_ID не задан в конфигурации. Админ-команды будут недоступны.")
-except (ValueError, TypeError) as e:
-    # Обрабатываем ошибку, если ADMIN_CHAT_ID не None, но не может быть преобразован в int
-    logging.error(f"Некорректное значение ADMIN_CHAT_ID: '{ADMIN_CHAT_ID}'. Ошибка: {e}. Админ-команды не будут работать.")
-    ADMIN_ID = None # Убеждаемся, что ADMIN_ID будет None при ошибке
+# --- Проверка ADMIN_CHAT_ID при запуске модуля ---
+# Логируем значение, которое будет использоваться для проверки прав
+if ADMIN_CHAT_ID is None:
+    logging.warning("ADMIN_CHAT_ID не задан или некорректен в config.py. Админ-команды будут недоступны.")
+elif not isinstance(ADMIN_CHAT_ID, int):
+     logging.error(f"ADMIN_CHAT_ID из config.py не является числом (тип: {type(ADMIN_CHAT_ID)}). Админ-команды не будут работать.")
+     # Устанавливаем в None, чтобы фильтр гарантированно не пропускал
+     ADMIN_CHAT_ID = None # Это изменит импортированное значение только в этом модуле
+else:
+     logging.info(f"ADMIN_CHAT_ID для проверки прав администратора: {ADMIN_CHAT_ID}")
 
-# --- Magic Filter для проверки админа ---
-# Фильтр будет активен, только если ADMIN_ID успешно загружен как int
-ADMIN_FILTER = (F.from_user.id == ADMIN_ID) if isinstance(ADMIN_ID, int) else (lambda: False)
+
+# --- Magic Filter для проверки админа (используем импортированный ADMIN_CHAT_ID) ---
+# Фильтр будет активен, только если ADMIN_CHAT_ID является int
+ADMIN_FILTER = (F.from_user.id == ADMIN_CHAT_ID) if isinstance(ADMIN_CHAT_ID, int) else (lambda: False)
+
 
 # --- Логирующий "pre-handler" для админских команд ---
-# Регистрируем его перед основными хэндлерами, чтобы он сработал первым
+# Регистрируем его перед основными хэндлерами админских команд
 @router.message(Command("set_prompt", "chats", "pdf"))
 async def before_admin_cmd_log(message: Message) -> bool: # Указываем тип возврата bool
     """Логирует получение потенциальной админ-команды ДО проверки прав."""
-    if message.from_user: # Убедимся, что пользователь есть
-        logging.info(f"Получена потенциальная админ-команда '{message.text.split()[0]}' от user {message.from_user.id} ({message.from_user.username or 'no username'})")
+    if message.from_user:
+        # Логируем ID пользователя и проверяемое значение ADMIN_CHAT_ID
+        is_admin_check = (isinstance(ADMIN_CHAT_ID, int) and message.from_user.id == ADMIN_CHAT_ID)
+        logging.info(
+            f"Получена потенциальная админ-команда '{message.text.split()[0]}' от user {message.from_user.id} ({message.from_user.username or 'no username'}). "
+            f"Проверяемый ADMIN_CHAT_ID={ADMIN_CHAT_ID} (тип: {type(ADMIN_CHAT_ID)}). Результат проверки прав: {is_admin_check}"
+        )
     else:
          logging.warning(f"Получена потенциальная админ-команда '{message.text.split()[0]}' без информации о пользователе.")
     # ВАЖНО: Возвращаем False, чтобы aiogram попробовал следующий хэндлер в цепочке
@@ -77,7 +82,8 @@ async def before_admin_cmd_log(message: Message) -> bool: # Указываем �
 @router.message(Command("set_prompt"), ADMIN_FILTER)
 async def cmd_set_prompt(message: Message):
     """Устанавливает системный промпт для OpenAI (только админ)."""
-    logging.info(f"Пользователь {message.from_user.id} (АДМИН) выполняет /set_prompt")
+    # Лог входа в хэндлер после успешной проверки фильтром
+    logging.info(f"Пользователь {message.from_user.id} (АДМИН={ADMIN_CHAT_ID}) выполняет /set_prompt")
     # Извлекаем аргументы команды
     new_prompt = message.text.split(maxsplit=1)[1].strip() if ' ' in message.text else ""
     if not new_prompt:
@@ -94,7 +100,8 @@ async def cmd_set_prompt(message: Message):
 @router.message(Command("chats"), ADMIN_FILTER)
 async def cmd_chats(message: Message):
     """Показывает список активных чатов (только админ)."""
-    logging.info(f"Пользователь {message.from_user.id} (АДМИН) выполняет /chats")
+    # Лог входа в хэндлер после успешной проверки фильтром
+    logging.info(f"Пользователь {message.from_user.id} (АДМИН={ADMIN_CHAT_ID}) выполняет /chats")
     try:
         logging.info("Запрашиваю список зарегистрированных чатов из БД...")
         chat_ids = await get_registered_chats()
@@ -110,17 +117,12 @@ async def cmd_chats(message: Message):
         for cid in chat_ids:
             try:
                 logging.debug(f"Получение информации для chat_id: {cid}")
-                # Добавляем таймаут к запросу get_chat, если API Telegram медленно отвечает
+                # Добавляем таймаут к запросу get_chat
                 chat_info = await message.bot.get_chat(chat_id=cid) # request_timeout=10
                 title = chat_info.title or chat_info.full_name or f"ID: {cid}"
                 link_part = ""
-                # Генерируем ссылку только для групп/каналов, не для приватных чатов
                 if chat_info.type in ('group', 'supergroup', 'channel'):
                     invite_link = chat_info.invite_link
-                    # Если нет инвайт-ссылки, попробуем создать ее (требует прав админа у бота)
-                    # if not invite_link:
-                    #     try: invite_link = await message.bot.export_chat_invite_link(cid)
-                    #     except Exception: pass # Игнорируем ошибку, если не можем создать ссылку
                     if invite_link:
                         link_part = f" (<a href='{invite_link}'>ссылка</a>)"
 
@@ -128,7 +130,6 @@ async def cmd_chats(message: Message):
                 logging.debug(f"Успешно получена информация для chat_id: {cid}")
                 processed_count += 1
             except Exception as e:
-                # Логируем ошибку, но продолжаем для других чатов
                 logging.warning(f"Не удалось получить информацию о чате {cid}: {e}")
                 lines.append(f"• ID: <code>{cid}</code> (ошибка доступа или чат не существует)")
         logging.info(f"Информация о {processed_count} из {len(chat_ids)} чатов собрана.")
@@ -149,7 +150,8 @@ async def cmd_chats(message: Message):
 @router.message(Command("pdf"), ADMIN_FILTER)
 async def cmd_pdf(message: Message):
     """Создает PDF с историей сообщений за последние 24ч (только админ)."""
-    logging.info(f"Пользователь {message.from_user.id} (АДМИН) выполняет /pdf")
+    # Лог входа в хэндлер после успешной проверки фильтром
+    logging.info(f"Пользователь {message.from_user.id} (АДМИН={ADMIN_CHAT_ID}) выполняет /pdf")
     args = message.text.split()
     if len(args) < 2 or not args[1].lstrip('-').isdigit():
         await message.reply("❗️ Укажите ID чата после команды.\nПример: `/pdf -1001234567890`")
@@ -200,7 +202,7 @@ async def cmd_pdf(message: Message):
 
             textobject.textLine(header)
             for line in lines: textobject.textLine(f"  {line}")
-            textobject.moveCursor(0, line_height / 2)
+            textobject.moveCursor(0, line_height / 2) # Отступ
 
         c.drawText(textobject)
         c.save()
@@ -278,7 +280,6 @@ async def send_summary(bot: Bot, chat_id: int):
         for i in range(0, len(full_summary_text), MAX_LEN):
             await bot.send_message(chat_id, full_summary_text[i:i + MAX_LEN], parse_mode="HTML")
 
-        # Исправлено logging.success на logging.info
         logging.info(f"✅ Сводка успешно отправлена в чат {chat_id}")
         await set_setting(f"last_summary_ts_{chat_id}", now_aware.isoformat())
     except Exception as e:
