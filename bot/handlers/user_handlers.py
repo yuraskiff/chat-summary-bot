@@ -3,8 +3,7 @@
 import logging
 from datetime import timezone # Импортируем для работы с временными метками
 
-from aiogram import Router
-# ----> ИЗМЕНЕННЫЙ ИМПОРТ <----
+from aiogram import Router, F # <--- Добавлен импорт F для Magic Filter
 from aiogram.types import Message
 from aiogram.filters import Command, CommandStart
 
@@ -16,7 +15,6 @@ from bot.handlers.admin_handlers import send_summary
 router = Router()
 
 # ----> ОБРАБОТЧИК КОМАНДЫ /start <----
-# Используем Message напрямую
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     """Обработчик команды /start. Отправляет приветственное сообщение."""
@@ -42,7 +40,7 @@ async def cmd_start(message: Message):
         logging.exception(f"Ошибка при отправке ответа на /start пользователю {message.from_user.id}: {e}")
 
 # ----> ОБРАБОТЧИК КОМАНДЫ /summary <----
-# Используем Message напрямую
+# Этот обработчик доступен всем
 @router.message(Command("summary"))
 async def cmd_summary(message: Message):
     """Позволяет любому участнику чата вызвать сводку за последние 24 часа."""
@@ -62,53 +60,68 @@ async def cmd_summary(message: Message):
              logging.error(f"Не удалось отправить сообщение об ошибке /summary в чат {chat_id}: {send_error}")
 
 
-# ----> ОБЩИЙ ОБРАБОТЧИК СООБЩЕНИЙ (для сохранения) <----
-# Используем Message напрямую
-@router.message()
-async def handle_message(message: Message):
+# ----> ОБРАБОТЧИК ОБЫЧНЫХ ТЕКСТОВЫХ СООБЩЕНИЙ <----
+# Ловит только сообщения с текстом, который НЕ начинается с "/"
+@router.message(F.text & ~F.text.startswith('/'))
+async def handle_text_message(message: Message):
     """
-    Автоматически регистрирует чат (если новый)
-    и сохраняет текст сообщения или подпись к медиа в БД.
-    Игнорирует сообщения, начинающиеся со слеша (команды).
+    Сохраняет ТОЛЬКО обычные текстовые сообщения (не команды) в БД.
     """
-    # Не обрабатываем сообщения без отправителя (например, системные канальные посты)
+    # Не обрабатываем сообщения без отправителя
     if not message.from_user:
         return
 
-    # Регистрируем чат (ON CONFLICT DO NOTHING в db.py)
+    # Регистрируем чат (на случай, если бота добавили без события my_chat_member)
     await register_chat(message.chat.id)
 
-    # Определяем текст для сохранения
-    text_to_save = None
-    # Сохраняем только если есть текст и он не начинается с "/"
-    if message.text and not message.text.startswith('/'):
-        text_to_save = message.text
-    # Или если есть подпись к медиа
-    elif message.caption:
-        text_to_save = message.caption
+    # Сохраняем текст
+    text_to_save = message.text
+    sender_name = message.from_user.username or message.from_user.full_name or f"User_{message.from_user.id}"
+    timestamp_to_save = message.date
+    if timestamp_to_save.tzinfo is None: timestamp_to_save = timestamp_to_save.replace(tzinfo=timezone.utc)
+    elif timestamp_to_save.tzinfo != timezone.utc: timestamp_to_save = timestamp_to_save.astimezone(timezone.utc)
 
-    # Сохраняем, если есть что сохранять
-    if text_to_save:
-        # Используем message.date (aware datetime от Telegram)
-        timestamp_to_save = message.date
-        # Дополнительная проверка и приведение к UTC для надежности
-        if timestamp_to_save.tzinfo is None:
-            timestamp_to_save = timestamp_to_save.replace(tzinfo=timezone.utc)
-        elif timestamp_to_save.tzinfo != timezone.utc:
-            timestamp_to_save = timestamp_to_save.astimezone(timezone.utc)
+    try:
+        await save_message(
+            chat_id=message.chat.id,
+            username=sender_name,
+            text=text_to_save,
+            timestamp=timestamp_to_save
+        )
+    except Exception as e:
+        # Логируем ошибку сохранения, но не беспокоим пользователя
+        logging.exception(f"Ошибка при сохранении ТЕКСТОВОГО сообщения в БД для чата {message.chat.id}: {e}")
 
-        # Определяем имя пользователя (username или full_name, или ID как fallback)
-        sender_name = message.from_user.username or message.from_user.full_name or f"User_{message.from_user.id}"
 
-        try:
-            await save_message(
-                chat_id=message.chat.id,
-                username=sender_name,
-                text=text_to_save,
-                timestamp=timestamp_to_save # Передаем aware datetime
-            )
-        except Exception as e:
-            # Логируем ошибку сохранения, но не беспокоим пользователя
-            logging.exception(f"Ошибка при сохранении сообщения в БД для чата {message.chat.id}: {e}")
+# ----> ОБРАБОТЧИК ПОДПИСЕЙ К МЕДИА (CAPTION) <----
+# Ловит только сообщения, у которых есть подпись (caption)
+@router.message(F.caption)
+async def handle_caption_message(message: Message):
+    """Сохраняет ТОЛЬКО подписи к медиа (фото, видео, документы) в БД."""
+    # Не обрабатываем сообщения без отправителя
+    if not message.from_user:
+        return
+
+    # Регистрируем чат
+    await register_chat(message.chat.id)
+
+    # Сохраняем подпись
+    text_to_save = message.caption # Берем caption
+    sender_name = message.from_user.username or message.from_user.full_name or f"User_{message.from_user.id}"
+    timestamp_to_save = message.date
+    if timestamp_to_save.tzinfo is None: timestamp_to_save = timestamp_to_save.replace(tzinfo=timezone.utc)
+    elif timestamp_to_save.tzinfo != timezone.utc: timestamp_to_save = timestamp_to_save.astimezone(timezone.utc)
+
+    try:
+        await save_message(
+            chat_id=message.chat.id,
+            username=sender_name,
+            text=text_to_save, # Сохраняем подпись как текст
+            timestamp=timestamp_to_save
+        )
+    except Exception as e:
+        logging.exception(f"Ошибка при сохранении CAPTION сообщения в БД для чата {message.chat.id}: {e}")
+
+# Важно: Нет общего @router.message() без фильтров, чтобы не перехватывать команды из других роутеров.
 
 # --- END OF FILE user_handlers.py ---
