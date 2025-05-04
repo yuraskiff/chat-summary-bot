@@ -6,6 +6,8 @@ import sys # Для sys.exit
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, F
+# ----> ДОБАВЛЕН ИМПОРТ <----
+from aiogram.client.default import DefaultBotProperties
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 
@@ -18,34 +20,28 @@ try:
     from db.db import init_pool, close_pool
     from config.config import BOT_TOKEN, WEBHOOK_HOST, WEBHOOK_PATH, PORT, ADMIN_CHAT_ID
 except (ImportError, ValueError) as e:
-     # Ловим ошибки импорта или ValueErrors из config.py на самом раннем этапе
      logging.basicConfig(level=logging.CRITICAL, format="%(asctime)s - %(levelname)s - %(message)s")
      logging.critical(f"Критическая ошибка при загрузке конфигурации или зависимостей: {e}")
      sys.exit(f"Критическая ошибка конфигурации: {e}")
 
-# Загружаем переменные окружения из .env файла (на случай локального запуска)
+# Загружаем переменные окружения из .env файла
 load_dotenv()
 
 # --- Настройка логирования ---
-# Устанавливаем базовую конфигурацию
 logging.basicConfig(
-    level=logging.INFO, # Уровень логирования по умолчанию
+    level=logging.INFO,
     format="%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s",
     datefmt='%Y-%m-%d %H:%M:%S',
-    # handlers=[ # Можно настроить вывод в файл
-    #     logging.FileHandler("bot.log", encoding='utf-8'),
-    #     logging.StreamHandler(sys.stdout) # Вывод в консоль
-    # ]
 )
-# Уменьшаем "болтливость" библиотек
 logging.getLogger("aiogram.client.session").setLevel(logging.WARNING)
-logging.getLogger("aiohttp.access").setLevel(logging.INFO) # Оставляем INFO для access логов aiohttp
+logging.getLogger("aiohttp.access").setLevel(logging.INFO)
 logging.getLogger("apscheduler.scheduler").setLevel(logging.INFO)
 logging.getLogger("asyncpg").setLevel(logging.WARNING)
 
 # --- Инициализация Bot и Dispatcher ---
 try:
-    bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
+    # ----> ИЗМЕНЕНА СТРОКА ИНИЦИАЛИЗАЦИИ BOT <----
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
     logging.info("Bot и Dispatcher инициализированы.")
 except Exception as e:
@@ -53,9 +49,7 @@ except Exception as e:
     sys.exit("Ошибка инициализации Aiogram.")
 
 # --- Подключение Middleware ---
-# Middleware применяется ко всем Message обновлениям
-# Убедитесь, что AuthMiddleware написан корректно
-if ADMIN_CHAT_ID: # Подключаем middleware только если админ ID задан
+if ADMIN_CHAT_ID:
     dp.message.middleware(AuthMiddleware())
     logging.info("AuthMiddleware подключен.")
 else:
@@ -71,17 +65,13 @@ logging.info("Роутеры подключены: user, chat, admin.")
 
 async def health_check(request: web.Request) -> web.Response:
     """Простая проверка доступности сервиса."""
-    # TODO: Добавить проверку доступности БД и OpenAI, если нужно
     return web.Response(text="OK")
 
 async def on_startup(app: web.Application):
     """Выполняется при старте веб-приложения."""
     logging.info("Запуск приложения...")
-    # Получаем объект бота из контекста приложения (если используем setup_application)
-    # Или используем глобальный объект bot, как сейчас
-    current_bot = app.get('bot') or bot # Используем bot из app или глобальный
+    current_bot = app.get('bot') or bot
 
-    # Инициализация пула соединений с БД
     try:
         await init_pool()
         logging.info("✅ Пул БД успешно инициализирован")
@@ -89,30 +79,23 @@ async def on_startup(app: web.Application):
         logging.critical(f"❌ Не удалось инициализировать БД: {e}. Завершение работы.")
         raise web.GracefulExit() from e
 
-    # Настройка и запуск планировщика
     try:
         admin_handlers.setup_scheduler(current_bot)
     except Exception as e:
         logging.error(f"⚠️ Не удалось настроить или запустить планировщик: {e}")
-        # Не останавливаем работу, но логируем
 
-    # Определение хоста для вебхука
     webhook_host = os.getenv("RENDER_EXTERNAL_HOSTNAME") or WEBHOOK_HOST
     if not webhook_host:
         logging.critical("❌ Не задан хост для webhook (RENDER_EXTERNAL_HOSTNAME или WEBHOOK_HOST)")
         raise web.GracefulExit("Webhook host is not set")
 
-    # Формирование URL вебхука
     webhook_url = f"https://{webhook_host}{WEBHOOK_PATH}"
     logging.info(f"▶ Используем WEBHOOK_URL: {webhook_url}")
 
-    # Установка вебхука
     try:
-        # webhook_secret = os.getenv("WEBHOOK_SECRET") # Получаем секрет, если он есть
         await current_bot.set_webhook(
             webhook_url,
-            # secret_token=webhook_secret, # Передаем секрет, если используем
-            allowed_updates=dp.resolve_used_update_types() # Автоматически определяем нужные типы обновлений
+            allowed_updates=dp.resolve_used_update_types()
         )
         logging.info(f"🚀 Webhook установлен: {webhook_url}")
         logging.info(f"Разрешенные типы обновлений: {dp.resolve_used_update_types()}")
@@ -125,7 +108,6 @@ async def on_shutdown(app: web.Application):
     logging.info("🏁 Завершение работы приложения...")
     current_bot = app.get('bot') or bot
 
-    # Удаляем вебхук
     logging.info("Удаление вебхука...")
     try:
         await current_bot.delete_webhook()
@@ -133,8 +115,7 @@ async def on_shutdown(app: web.Application):
     except Exception as e:
         logging.error(f"❌ Ошибка при удалении webhook: {e}")
 
-    # Остановка планировщика (если он был сохранен в app)
-    scheduler = app.get('scheduler') # Пример, если сохраняли планировщик
+    scheduler = app.get('scheduler')
     if scheduler and scheduler.running:
          try:
              scheduler.shutdown()
@@ -142,10 +123,8 @@ async def on_shutdown(app: web.Application):
          except Exception as e:
              logging.error(f"Ошибка при остановке планировщика: {e}")
 
-    # Закрываем пул соединений с БД
     await close_pool()
 
-    # Закрываем сессию бота
     logging.info("Закрытие сессии бота...")
     await current_bot.session.close()
     logging.info("Сессия бота закрыта.")
@@ -155,35 +134,24 @@ async def on_shutdown(app: web.Application):
 def main():
     """Основная функция для настройки и запуска."""
     app = web.Application()
-
-    # Добавляем маршрут для health check
     app.router.add_get("/", health_check)
 
-    # Настройка обработчика вебхуков Telegram
     webhook_request_handler = SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
-        # secret_token=os.getenv("WEBHOOK_SECRET") # Если используете секрет
     )
-    # Регистрируем по пути из конфига
     webhook_request_handler.register(app, path=WEBHOOK_PATH)
     logging.info(f"Обработчик вебхуков зарегистрирован по пути: {WEBHOOK_PATH}")
 
-    # Можно использовать setup_application для добавления bot и dp в контекст app
-    # setup_application(app, dp, bot=bot)
-
-    # Регистрируем функции startup и shutdown
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
 
-    # Запуск веб-сервера
     listen_host = "0.0.0.0"
     listen_port = PORT
     logging.info(f"Запуск веб-сервера на http://{listen_host}:{listen_port}")
     try:
         web.run_app(app, host=listen_host, port=listen_port)
     except OSError as e:
-        # Ловим ошибку "address already in use"
         logging.critical(f"Не удалось запустить веб-сервер на порту {listen_port}: {e}")
         sys.exit(f"Порт {listen_port} занят.")
     except Exception as e:
